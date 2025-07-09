@@ -74,7 +74,7 @@ async def get_week_date_range(current_date: datetime.date):
 async def weekly_results():
     msk_tz = pytz.timezone("Europe/Moscow")
     current_date = datetime.now(msk_tz).date()
-    if current_date.weekday() != 2:  # Fixed: 6 is Sunday, not 2
+    if current_date.weekday() != 6:  # Fixed: 6 is Sunday, not 2
         return ""
 
     monday, sunday = await get_week_date_range(current_date)
