@@ -9,7 +9,7 @@ from app.database import requests as req
 router = Router()
 media_groups = set()
 
-@router.message(F.photo & F.caption)
+@router.message(F.photo and F.caption)
 async def dialogs_handler(message: Message):
     try:
         # Проверяем, что в подписи ровно одно упоминание (@)

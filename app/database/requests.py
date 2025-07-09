@@ -20,7 +20,6 @@ async def count_daily_messages(from_user, current_date, message):
             client = await session.scalar(select(Client).where(Client.username == message.caption[1:]))
             if not client:
                 session.add(Client(username=message.caption[1:]))
-                await session.commit()
             else:
                 return
 
