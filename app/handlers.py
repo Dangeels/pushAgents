@@ -24,7 +24,7 @@ async def dialogs_handler(message: Message):
         mention_text = message.caption.strip()  # Получаем текст упоминания
         if mention!=len(mention_text):
             await message.answer(
-                "Подпись должна содержать только одно упоминание (@username) без дополнительного текста.")
+                "Сообщение должно содержать только одно упоминание (@username) без дополнительного текста.")
             return
 
         msk_tz = pytz.timezone("Europe/Moscow")
