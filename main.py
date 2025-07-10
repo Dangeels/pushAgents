@@ -3,7 +3,7 @@ import asyncio
 
 from aiogram import Bot, Dispatcher
 from aiogram.types import Message
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandStart
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 import app.handlers as handlers
@@ -17,6 +17,10 @@ bot = Bot(token=os.getenv("TOKEN"))
 dp = Dispatcher()
 scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
 
+
+@dp.message(CommandStart())
+async def cmd_start(message: Message):
+    print(message.chat.id)
 
 @dp.message(Command("test_daily"))
 async def test_daily_report(message: Message):
