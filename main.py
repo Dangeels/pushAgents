@@ -22,15 +22,6 @@ scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
 async def cmd_start(message: Message):
     print(message.chat.id)
 
-@dp.message(Command("test_daily"))
-async def test_daily_report(message: Message):
-    await handlers.day_res(bot)
-
-
-@dp.message(Command("test_weekly"))
-async def test_weekly_report(message: Message):
-    await handlers.week_res(bot)
-
 
 # Инициализация планировщика
 async def on_startup(dispatcher):

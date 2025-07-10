@@ -6,8 +6,10 @@ import os
 engine = create_async_engine(url='sqlite+aiosqlite:///db.sqlite3', echo=False)
 async_session = async_sessionmaker(engine)
 
+
 class Base(AsyncAttrs, DeclarativeBase):
     pass
+
 
 class Agent(Base):
     __tablename__ = 'agents'
@@ -16,6 +18,7 @@ class Agent(Base):
     nickname: Mapped[str] = mapped_column(String)
     norm_rate: Mapped[int] = mapped_column(default=int(os.getenv('NORM', '15')))
 
+
 class DailyMessage(Base):
     __tablename__ = 'daily_messages'
     tg_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -23,10 +26,19 @@ class DailyMessage(Base):
     dialogs_count: Mapped[int] = mapped_column(default=0)
     salary: Mapped[int] = mapped_column(default=0)
 
+
 class Client(Base):
     __tablename__ = 'clients'
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(String(40))
+
+
+class Admin(Base):
+    __tablename__ = 'admins'
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(40))
+    is_creator: Mapped[int] = mapped_column()
+
 
 async def async_main():
     async with engine.begin() as conn:

@@ -1,8 +1,103 @@
 import os
 import pytz
 from datetime import datetime, timedelta
-from sqlalchemy import select, update, func
-from app.database.models import async_session, Agent, DailyMessage, Client
+from sqlalchemy import select, update, delete, func
+from app.database.models import async_session, Agent, DailyMessage, Client, Admin
+
+
+async def is_admin(username):
+    async with async_session() as session:
+        username = username.strip('@')
+        admin = await session.scalar(select(Admin).where(Admin.username == username))
+        await session().commit()
+        if admin:
+            return True, admin.username, admin.is_creator
+        else:
+            return False, None, 0
+
+
+async def delete_admin(from_user, username):
+    async with async_session() as session:
+        username = username.strip('@')
+        admin1 = await session.scalar(select(Admin).where(Admin.username == from_user.username))
+        admin2 = await session.scalar(select(Admin).where(Admin.username == username))
+        if admin1.is_creator > admin2.is_creator:
+            await session.execute(delete(Admin).where(Admin.username == username))
+            await session.commit()
+            return True
+        await session.commit()
+        return False
+
+
+async def all_admins():
+    async with async_session() as session:
+        res = []
+        nicknames = []
+        admin = await session.scalars(select(Admin))
+        for a in admin:
+            nicknames.append(a.username)
+            res.append(f'@{a.username}')
+        return res, nicknames
+
+
+async def set_admin(username):
+    async with async_session() as session:
+        username = username.strip('@')
+        admin = await session.scalar(select(Admin).where(Admin.username == username))
+        if not admin:
+            session.add(Admin(username=username, is_creator=0))
+            session.commit()
+
+
+async def all_agents():
+    async with async_session() as session:
+        res = []
+        nicknames = []
+        agents = await session.scalars(select(Agent))
+        for agent in agents:
+            nicknames.append(agent.nickname)
+            res.append(f'Агент: @{agent.nickname}\nТекущая норма: {agent.norm_rate}')
+        return res, nicknames
+
+
+async def all_clients():
+    async with async_session() as session:
+        res = []
+        nicknames = []
+        clients = await session.scalars(select(Client))
+        for client in clients:
+            nicknames.append(client.username)
+            res.append(f'@{client.username}')
+        return res, nicknames
+
+
+async def all_daily_messages(current_date):
+    async with async_session() as session:
+        res = []
+        messages = await session.scalars(select(DailyMessage).where(DailyMessage.date == current_date))
+        for message in messages:
+            agent = await session.scalar(select(Agent).where(Agent.tg_id == message.tg_id))
+            res.append(f'Агент @{agent.nickname} - {message.dialogs_count} сообщений')
+        return res
+
+
+async def reset_norm(username, norm):
+    async with async_session() as session:
+        await session.execute(update(Agent).where(Agent.nickname == username)
+                              .values(norm_rate=norm))
+        await session.commit()
+
+
+async def delete_dialog(agent_username, client, current_date):
+    async with async_session() as session:
+        agent = await session.scalar(select(Agent).where(Agent.nickname == agent_username))
+        await session.execute(update(DailyMessage)
+                              .where(DailyMessage.tg_id == agent.tg_id, DailyMessage.date == current_date)
+                              .values(dialogs_count=DailyMessage.dialogs_count-1 if DailyMessage.dialogs_count > 0 else 0)
+                              )
+        await session.execute(delete(Client).where(Client.username == client))
+        await session.commit()
+
 
 async def set_agent(from_user):
     async with async_session() as session:
@@ -10,6 +105,7 @@ async def set_agent(from_user):
         if not agent:
             session.add(Agent(tg_id=from_user.id, nickname=from_user.username, norm_rate=int(os.getenv('NORM'))))
             await session.commit()
+
 
 async def count_daily_messages(from_user, current_date, message):
     async with async_session() as session:
@@ -34,6 +130,7 @@ async def count_daily_messages(from_user, current_date, message):
             print(f"Ошибка в count_daily_messages: {e}")
             await session.rollback()
 
+
 async def daily_results(current_date):
     dct = {}
     async with async_session() as session:
@@ -54,8 +151,8 @@ async def daily_results(current_date):
 
                 await session.execute(update(Agent).where(Agent.tg_id == message.tg_id).values(norm_rate=norm))
                 await session.execute(update(DailyMessage)
-                                     .where(DailyMessage.tg_id == message.tg_id, DailyMessage.date == message.date)
-                                     .values(salary=salary))
+                                      .where(DailyMessage.tg_id == message.tg_id, DailyMessage.date == message.date)
+                                      .values(salary=salary))
 
                 dct[message.tg_id] = [old_norm_.nickname, message.dialogs_count, bonuses, salary, old_norm, norm]
             await session.commit()
@@ -65,11 +162,13 @@ async def daily_results(current_date):
             await session.rollback()
             return {}
 
+
 async def get_week_date_range(current_date: datetime.date):
     days_since_monday = current_date.weekday()
     monday = current_date - timedelta(days=days_since_monday)
     sunday = monday + timedelta(days=6)
     return monday, sunday
+
 
 async def weekly_results():
     msk_tz = pytz.timezone("Europe/Moscow")
