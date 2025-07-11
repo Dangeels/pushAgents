@@ -1,6 +1,7 @@
 import asyncio
 import os
 import pytz
+
 from datetime import datetime
 from aiogram import Router, F
 from aiogram.types import Message
@@ -143,6 +144,21 @@ async def reset_norm(message: Message):
             await message.answer(f'Агента @{username} не существует')
     except Exception:
         await message.answer('Неверный формат сообщения')
+
+@router.message(Command('check_client'))  # сообщение формата /check_client @username
+async def check_client(message: Message):
+    try:
+        clients = await req.all_clients()
+        client = message.text.split()[1].strip('@')
+        dct = {True:f'@{client} находится в списке клиентов, диалог с ним засчитан не будет',
+               False:f'@{client} не найден в списке клиентов, диалог будет засчитан'
+               }
+        response = await message.answer(dct[client in clients[1]])
+        await asyncio.sleep(10)
+        await message.delete()
+        await response.delete()
+    except Exception:
+        await message.answer('Ошибка в формате сообщения')
 
 
 @router.message(Command('delete_dialog'))  # сообщение формата /delete_dialog agent_nickname client_nickname
