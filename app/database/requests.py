@@ -9,10 +9,13 @@ async def is_admin(username):
     async with async_session() as session:
         username = username.strip('@')
         admin = await session.scalar(select(Admin).where(Admin.username == username))
-        await session().commit()
         if admin:
-            return True, admin.username, admin.is_creator
+            us = admin.username
+            cre = admin.is_creator
+            await session.commit()
+            return True, us, cre
         else:
+            await session.commit()
             return False, None, 0
 
 
@@ -40,13 +43,12 @@ async def all_admins():
         return res, nicknames
 
 
-async def set_admin(username):
+async def set_admin(username1):
     async with async_session() as session:
-        username = username.strip('@')
-        admin = await session.scalar(select(Admin).where(Admin.username == username))
+        admin = await session.scalar(select(Admin).where(Admin.username == username1))
         if not admin:
-            session.add(Admin(username=username, is_creator=0))
-            session.commit()
+            session.add(Admin(username=username1, is_creator=0))
+            await session.commit()
 
 
 async def all_agents():
@@ -77,7 +79,13 @@ async def all_daily_messages(current_date):
         messages = await session.scalars(select(DailyMessage).where(DailyMessage.date == current_date))
         for message in messages:
             agent = await session.scalar(select(Agent).where(Agent.tg_id == message.tg_id))
-            res.append(f'Агент @{agent.nickname} - {message.dialogs_count} сообщений')
+            if message.dialogs_count % 10 == 1:
+                soo = 'сообщение'
+            elif 2 <= message.dialogs_count % 10 <= 4:
+                soo = 'сообщения'
+            else:
+                soo = "сообщений"
+            res.append(f'Агент @{agent.nickname} - {message.dialogs_count} {soo}')
         return res
 
 
@@ -91,9 +99,12 @@ async def reset_norm(username, norm):
 async def delete_dialog(agent_username, client, current_date):
     async with async_session() as session:
         agent = await session.scalar(select(Agent).where(Agent.nickname == agent_username))
+        daily_message = await session.scalar(select(DailyMessage)
+                                             .where(DailyMessage.tg_id == agent.tg_id,
+                                                    DailyMessage.date == current_date))
         await session.execute(update(DailyMessage)
                               .where(DailyMessage.tg_id == agent.tg_id, DailyMessage.date == current_date)
-                              .values(dialogs_count=DailyMessage.dialogs_count-1 if DailyMessage.dialogs_count > 0 else 0)
+                              .values(dialogs_count=max(daily_message.dialogs_count-1, 0))
                               )
         await session.execute(delete(Client).where(Client.username == client))
         await session.commit()

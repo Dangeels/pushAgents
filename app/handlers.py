@@ -11,19 +11,26 @@ router = Router()
 media_groups = set()
 
 
-@router.message(Command('all_admins') and F.chat.type == 'private')
+@router.message(Command('all_admins'))
 async def all_admins(message: Message):
+    if message.chat.type != 'private':
+        return
     if is_admin(message.from_user.username):
         admins = await req.all_admins()
         await message.answer('Список администраторов\n'+'\n'.join(admins[0]))
 
 
-@router.message(Command('delete_admin') and F.chat.type == 'private')  # формат сообщения /delete_admin @user
+@router.message(Command('delete_admin'))  # формат сообщения /delete_admin @user
 async def delete_admin(message: Message):
+    if message.chat.type != 'private':
+        return
     try:
         username = message.text.split()[1].strip('@')
         ad = await is_admin(message.from_user.username)
         ad2 = await is_admin(username)
+        if username==message.from_user.username:
+            await message.answer('Вы не можете удалить себя из списка администраторов')
+            return
         if ad[0] and ad[2] and ad2[0]:
             dct = {True: 'Пользователь успешно удалён из списка администраторов',
                    False: 'Ошибка доступа: вы не можете удалить этого пользователя'}
@@ -35,16 +42,18 @@ async def delete_admin(message: Message):
         await message.answer('Ошибка в формате сообщения')
 
 
-@router.message(Command('set_admin') and F.chat.type == 'private')  # сообщение формата /set_admin @username
+@router.message(Command('set_admin'))  # сообщение формата /set_admin @username
 async def set_admin(message: Message):
+    if message.chat.type != 'private':
+        return
     try:
         ad = await is_admin(message.from_user.username)
         if ad[0] and ad[2]:
             username = message.text.split()[1].strip('@')
             await req.set_admin(username)
             await message.answer(f'@{username} успешно добавлен в список администраторов')
-    except Exception:
-        await message.answer('Ошибка в формате сообщения')
+    except Exception as e:
+        await message.answer(f'Ошибка в формате сообщения {e}')
 
 
 async def is_admin(username):
@@ -59,41 +68,49 @@ def get_current_date():
     return date_str
 
 
-@router.message(Command('help') and F.chat.type == 'private')
+@router.message(Command('help'))
 async def help(message: Message):
+    if message.chat.type != 'private':
+        return
     ad = await is_admin(message.from_user.username)
     if ad[0]:
         txt = """
         Команда /all_agents - получить список всех работающих агентов
-        Команда /all_daily_messages - получить список всех диалогов за сегодня       
+Команда /all_daily_messages - получить список всех диалогов за сегодня       
         
-        Команда /reset_norm @username - сбросить/установить другую дневную норму у агента; 
-            пример использования: /reset_norm @username 20 - установит агенту @username дневную норму в 20 диалогов
-                                  /reset_norm @username - сбросит агенту @username дневную норму до базового значения (15)
+Команда /reset_norm @username - сбросить/установить другую дневную норму у агента; 
+Пример использования: 
+● /reset_norm @username 20 - установит агенту @username дневную норму в 20 диалогов
+● /reset_norm @username - сбросит агенту @username дневную норму до базового значения (15)
                                   
-        Команда /delete_dialog @agent_username @client_username - удалить один диалог агента из базы данных
-            где @agent_username указывается никнейм агента, где @client_username указывается никнейм клиента из неправильного отчёта
-            удалять можно только диалоги за текущий день
+Команда /delete_dialog @agent @client - удалить один диалог агента из базы данных, 
+● где @agent указывается никнейм агента, 
+● где @client указывается никнейм клиента из неправильного отчёта
+● удалять можно только диалоги за текущий день
         
-        Команда /all_admins - получить список всех администраторов 
-        Команда /set_admin @username - добавить нового администратора
-        Команда /delete_admin @username - удалить администратора
+Команда /all_admins - получить список всех администраторов 
+Команда /set_admin @username - добавить нового администратора
+Команда /delete_admin @username - удалить администратора
 """
         await message.answer(txt)
 
 
-@router.message(Command('all_agents') and F.chat.type == 'private')
+@router.message(Command('all_agents'))
 async def all_agents(message: Message):
+    if message.chat.type != 'private':
+        return
     ad = await is_admin(message.from_user.username)
     if not ad[0]:
         await message.answer('Доступ запрещён')
         return
     agents = await req.all_agents()
-    await message.answer('\n'.join(agents[0]))
+    await message.answer('\n\n'.join(agents[0]))
 
 
-@router.message(Command('all_daily_messages') and F.chat.type == 'private')
+@router.message(Command('all_daily_messages'))
 async def all_daily_messages(message: Message):
+    if message.chat.type != 'private':
+        return
     ad = await is_admin(message.from_user.username)
     if not ad[0]:
         await message.answer('Доступ запрещён')
@@ -103,8 +120,10 @@ async def all_daily_messages(message: Message):
     await message.answer(f'Сообщения за {current_date}\n'+'\n'.join(messages))
 
 
-@router.message(Command('reset_norm') and F.chat.type == 'private')  # сообщение формата /reset_norm nickname 15
+@router.message(Command('reset_norm'))  # сообщение формата /reset_norm nickname 15
 async def reset_norm(message: Message):
+    if message.chat.type != 'private':
+        return
     ad = await is_admin(message.from_user.username)
     if not ad[0]:
         await message.answer('Доступ запрещён')
@@ -126,8 +145,10 @@ async def reset_norm(message: Message):
         await message.answer('Неверный формат сообщения')
 
 
-@router.message(Command('delete_dialog') and F.chat.type == 'private')  # сообщение формата /delete_dialog agent_nickname client_nickname
+@router.message(Command('delete_dialog'))  # сообщение формата /delete_dialog agent_nickname client_nickname
 async def delete_dialog(message: Message):
+    if message.chat.type != 'private':
+        return
     ad = await is_admin(message.from_user.username)
     if not ad[0]:
         await message.answer('Доступ запрещён')
@@ -146,7 +167,7 @@ async def delete_dialog(message: Message):
         else:
             await message.answer('Неверный @username агента или клиента')
     except Exception:
-        await message.answer('Неверный формат сообщения')
+        await message.answer(f'Неверный формат сообщения')
 
 
 @router.message(F.photo and F.caption and F.caption.count('@'))
@@ -193,13 +214,15 @@ async def day_res(bot):
     res = []
     done = {True: '(норма выполнена)', False: '(норма не выполнена)'}
     for key in dct.keys():
+        if dct[key][1] == 0:
+            continue
         if dct[key][1] < dct[key][4]:
             perenos = dct[key][1]
         else:
             perenos = (dct[key][1] - dct[key][4]) % 5
 
         txt = f"""Ник агента: @{dct[key][0]}
-Количество диалогов за день: {dct[key][1]} {done[dct[key][1] >= dct[key][4]]}
+Количество диалогов за день: {dct[key][1]}/{dct[key][4]} {done[dct[key][1] >= dct[key][4]]}
 Бонусы за день: {dct[key][2]} рублей
 Перенос диалогов на завтра: {perenos} (завтрашняя норма {dct[key][5]})
 Зарплата за день без учёта клиентов: {dct[key][3]} рублей
