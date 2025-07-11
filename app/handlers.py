@@ -155,10 +155,9 @@ async def check_client(message: Message):
                }
         response = await message.answer(dct[client in clients[1]])
         await asyncio.sleep(10)
-        await message.delete()
         await response.delete()
-    except Exception:
-        await message.answer('Ошибка в формате сообщения')
+    except Exception as e:
+        await message.answer(f'Ошибка в формате сообщения {e}')
 
 
 @router.message(Command('delete_dialog'))  # сообщение формата /delete_dialog agent_nickname client_nickname
