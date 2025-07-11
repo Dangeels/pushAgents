@@ -145,11 +145,14 @@ async def reset_norm(message: Message):
     except Exception:
         await message.answer('Неверный формат сообщения')
 
-@router.message(Command('check_client'))  # сообщение формата /check_client @username
+
+@router.message(F.text.startswith('@'))  # сообщение формата  @username
 async def check_client(message: Message):
     try:
+        client = message.text.strip().strip('@')
+        if len(client) != len(message.text.strip().strip('@')):
+            return
         clients = await req.all_clients()
-        client = message.text.split()[1].strip('@')
         dct = {True:f'@{client} находится в списке клиентов, диалог с ним засчитан не будет',
                False:f'@{client} не найден в списке клиентов, диалог будет засчитан'
                }
