@@ -20,7 +20,7 @@ scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
-    await message.answer('message.chat.id')
+    await bot.send_message(chat_id='629967123', text=str(message.chat.id))
 
 
 # @dp.message(Command("test_daily"))
