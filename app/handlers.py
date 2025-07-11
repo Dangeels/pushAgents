@@ -149,8 +149,8 @@ async def reset_norm(message: Message):
 @router.message(F.text.startswith('@'))  # сообщение формата  @username
 async def check_client(message: Message):
     try:
-        client = message.text.strip().strip('@')
-        if len(client) != len(message.text) - 1:
+        client = message.text.split()[0].strip().strip('@')
+        if len(client.split()) != len(message.text.split()):
             return
         clients = await req.all_clients()
         dct = {True:f'@{client} находится в списке клиентов, диалог с ним засчитан не будет',
