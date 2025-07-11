@@ -191,7 +191,10 @@ async def dialogs_handler(message: Message):
         date_str = get_current_date()
 
         await req.set_agent(message.from_user)
-        await req.count_daily_messages(message.from_user, date_str, message)
+        repeat = await req.count_daily_messages(message.from_user, date_str, message)
+
+        if repeat:
+            await message.answer('Повтор. Этот клиент ранее упоминался в отчёте')
 
         media = message.media_group_id
         if media and media not in media_groups:

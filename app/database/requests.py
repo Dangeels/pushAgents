@@ -128,7 +128,7 @@ async def count_daily_messages(from_user, current_date, message):
             if not client:
                 session.add(Client(username=message.caption[1:]))
             else:
-                return
+                return True
 
             if not daily_message:
                 session.add(DailyMessage(tg_id=from_user.id, date=current_date, dialogs_count=1))
