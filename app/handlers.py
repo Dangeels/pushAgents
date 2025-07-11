@@ -150,7 +150,7 @@ async def reset_norm(message: Message):
 async def check_client(message: Message):
     try:
         client = message.text.strip().strip('@')
-        if len(client) != len(message.text.strip().strip('@')):
+        if len(client) != len(message.text) - 1:
             return
         clients = await req.all_clients()
         dct = {True:f'@{client} находится в списке клиентов, диалог с ним засчитан не будет',
