@@ -264,7 +264,7 @@ async def day_res(bot):
 Перенос диалогов на завтра: {perenos} (завтрашняя норма {dct[key][5]})
 Зарплата за день без учёта клиентов: {dct[key][3]} рублей
 """
-        res.append(txt)
+        res.append(f'Отчёт за {date_str}\n\n'+txt)
 
     report = '\n'.join(res) or f"Нет данных за {date_str}."
     for i in range(0, len(report), 4096):
