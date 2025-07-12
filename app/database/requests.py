@@ -43,6 +43,14 @@ async def all_admins():
         return res, nicknames
 
 
+async def set_client(username1):
+    async with async_session() as session:
+        client = await session.scalar(select(Client).where(Client.username == username1))
+        if not client:
+            session.add(Client(username=username1))
+            await session.commit()
+
+
 async def set_admin(username1):
     async with async_session() as session:
         admin = await session.scalar(select(Admin).where(Admin.username == username1))

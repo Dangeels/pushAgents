@@ -43,6 +43,20 @@ async def delete_admin(message: Message):
         await message.answer('Ошибка в формате сообщения')
 
 
+@router.message(Command('set_client'))  # сообщение формата /set_client @username
+async def set_client(message: Message):
+    if message.chat.type != 'private':
+        return
+    try:
+        ad = await is_admin(message.from_user.username)
+        if ad[0]:
+            username = message.text.split()[1].strip('@')
+            await req.set_client(username)
+            await message.answer(f'@{username} успешно добавлен в список клиентов')
+    except Exception:
+        await message.answer(f'Ошибка в формате сообщения')
+
+
 @router.message(Command('set_admin'))  # сообщение формата /set_admin @username
 async def set_admin(message: Message):
     if message.chat.type != 'private':
@@ -53,8 +67,8 @@ async def set_admin(message: Message):
             username = message.text.split()[1].strip('@')
             await req.set_admin(username)
             await message.answer(f'@{username} успешно добавлен в список администраторов')
-    except Exception as e:
-        await message.answer(f'Ошибка в формате сообщения {e}')
+    except Exception:
+        await message.answer(f'Ошибка в формате сообщения')
 
 
 async def is_admin(username):
