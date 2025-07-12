@@ -248,7 +248,7 @@ async def clean_processed_media_groups(media_group_id):
 async def day_res(bot):
     date_str = get_current_date()
     dct = await req.daily_results(date_str)
-    res = []
+    res = [f'Отчёт за {date_str}\n\n']
     done = {True: '(норма выполнена)', False: '(норма не выполнена)'}
     for key in dct.keys():
         if dct[key][1] == 0:
