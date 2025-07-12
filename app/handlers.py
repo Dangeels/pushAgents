@@ -248,7 +248,7 @@ async def clean_processed_media_groups(media_group_id):
 async def day_res(bot):
     date_str = get_current_date()
     dct = await req.daily_results(date_str)
-    res = []
+    res = [f'Отчёт за {date_str}\n\n']
     done = {True: '(норма выполнена)', False: '(норма не выполнена)'}
     for key in dct.keys():
         if dct[key][1] == 0:
@@ -264,9 +264,10 @@ async def day_res(bot):
 Перенос диалогов на завтра: {perenos} (завтрашняя норма {dct[key][5]})
 Зарплата за день без учёта клиентов: {dct[key][3]} рублей
 """
-        res.append(f'Отчёт за {date_str}\n\n'+txt)
+        res.append(txt)
 
     report = '\n'.join(res) or f"Нет данных за {date_str}."
+
     for i in range(0, len(report), 4096):
         await bot.send_message(chat_id=os.getenv('CHAT_ID'), text=report[i:i+4096])
 
