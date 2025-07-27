@@ -140,6 +140,8 @@ async def add_dialog(agent_username, client, current_date):
                 session.add(Client(username=client))
             else:
                 return True
+            if not agent:
+                return False
             if not daily_message:
                 session.add(DailyMessage(tg_id=agent.tg_id, date=current_date, dialogs_count=1))
             else:

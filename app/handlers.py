@@ -157,7 +157,7 @@ async def all_daily_messages(message: Message):
         return
     current_date = get_current_date()
     messages = await req.all_daily_messages(current_date)
-    count = sum([int(i.split()[-1]) for i in messages])
+    count = sum([int(i.split()[-2]) for i in messages])
     await message.answer(f'Сообщения за {current_date}. Количество: {count}\n'+'\n'.join(messages))
 
 
@@ -232,6 +232,8 @@ async def add_dialog(message: Message):
         repeat = await req.add_dialog(agent_nickname, client_nickname, get_current_date())
         if repeat:
             await message.answer('Повтор. Этот клиент ранее упоминался в отчёте')
+        elif repeat == False:
+            await message.answer('Этого агента нет в базе данных. Сначала ему требуется отправить хотя бы один отчёт')
         else:
             await message.answer(f'Диалог успешно добавлен агенту @{agent_nickname}')
     except Exception:
