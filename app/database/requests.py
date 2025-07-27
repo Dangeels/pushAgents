@@ -136,12 +136,12 @@ async def add_dialog(agent_username, client, current_date):
                                                  .where(DailyMessage.tg_id == agent.tg_id,
                                                         DailyMessage.date == current_date))
             client = await session.scalar(select(Client).where(Client.username == client))
+            if not agent:
+                return False
             if not client:
                 session.add(Client(username=client))
             else:
                 return True
-            if not agent:
-                return False
             if not daily_message:
                 session.add(DailyMessage(tg_id=agent.tg_id, date=current_date, dialogs_count=1))
             else:
