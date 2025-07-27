@@ -230,10 +230,10 @@ async def add_dialog(message: Message):
         agent_nickname = message.text.split()[1].strip('@')
         client_nickname = message.text.split()[2].strip('@')
         repeat = await req.add_dialog(agent_nickname, client_nickname, get_current_date())
-        if repeat:
-            await message.answer('Повтор. Этот клиент ранее упоминался в отчёте')
-        elif repeat == False:
+        if repeat == 'not_agent':
             await message.answer('Этого агента нет в базе данных. Сначала ему требуется отправить хотя бы один отчёт')
+        elif repeat == 'повтор':
+            await message.answer('Повтор. Этот клиент ранее упоминался в отчёте')
         else:
             await message.answer(f'Диалог успешно добавлен агенту @{agent_nickname}')
     except Exception:
