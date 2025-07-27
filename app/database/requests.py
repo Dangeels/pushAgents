@@ -2,7 +2,7 @@ import os
 import pytz
 from datetime import datetime, timedelta
 from sqlalchemy import select, update, delete, func
-from app.database.models import async_session, Agent, DailyMessage, Client, Admin
+from app.database.models import async_session, Agent, DailyMessage, Client, Admin, Norm
 
 
 async def is_admin(username):
@@ -81,6 +81,18 @@ async def all_clients():
         return res, nicknames
 
 
+async def all_time_messages():
+    async with async_session() as session:
+        messages = await session.scalars(select(DailyMessage))
+        return sum([message.dialogs_count for message in messages])
+
+
+async def count_day(current_date):
+    async with async_session() as session:
+        count = await session.scalars(select(DailyMessage).where(DailyMessage.date == current_date))
+        return sum([int(i.dialogs_count) for i in count])
+
+
 async def all_daily_messages(current_date):
     async with async_session() as session:
         res = []
@@ -97,11 +109,47 @@ async def all_daily_messages(current_date):
         return res
 
 
+async def get_norm():
+    async with async_session() as session:
+        norm = await session.scalar(select(Norm).where(Norm.id == 1))
+        return norm.norm
+
+
+async def set_new_norm(new_norm: int):
+    async with async_session() as session:
+        await session.execute(update(Norm).where(Norm.id == 1).values(norm=new_norm))
+        await session.commit()
+
+
 async def reset_norm(username, norm):
     async with async_session() as session:
         await session.execute(update(Agent).where(Agent.nickname == username)
                               .values(norm_rate=norm))
         await session.commit()
+
+
+async def add_dialog(agent_username, client, current_date):
+    async with async_session() as session:
+        try:
+            agent = await session.scalar(select(Agent).where(Agent.nickname == agent_username))
+            daily_message = await session.scalar(select(DailyMessage)
+                                                 .where(DailyMessage.tg_id == agent.tg_id,
+                                                        DailyMessage.date == current_date))
+            client = await session.scalar(select(Client).where(Client.username == client))
+            if not client:
+                session.add(Client(username=client))
+            else:
+                return True
+            if not daily_message:
+                session.add(DailyMessage(tg_id=agent.tg_id, date=current_date, dialogs_count=1))
+            else:
+                await session.execute(update(DailyMessage).where(
+                    DailyMessage.tg_id == daily_message.tg_id, DailyMessage.date == daily_message.date
+                ).values(dialogs_count=daily_message.dialogs_count + 1))
+            await session.commit()
+        except Exception as e:
+            print(f"Ошибка в count_daily_messages: {e}")
+            await session.rollback()
 
 
 async def delete_dialog(agent_username, client, current_date):
@@ -122,7 +170,8 @@ async def set_agent(from_user):
     async with async_session() as session:
         agent = await session.scalar(select(Agent).where(Agent.tg_id == from_user.id))
         if not agent:
-            session.add(Agent(tg_id=from_user.id, nickname=from_user.username, norm_rate=int(os.getenv('NORM'))))
+            norm = await get_norm()
+            session.add(Agent(tg_id=from_user.id, nickname=from_user.username, norm_rate=norm))
             await session.commit()
 
 
@@ -158,7 +207,7 @@ async def daily_results(current_date):
             for message in daily_messages:
                 old_norm_ = await session.scalar(select(Agent).where(Agent.tg_id == message.tg_id))
                 old_norm = old_norm_.norm_rate
-                norm = int(os.getenv('NORM'))
+                norm = await get_norm()
                 bonuses = 0
                 if message.dialogs_count >= old_norm:
                     bonuses = int(os.getenv('BONUSES')) * int((message.dialogs_count - old_norm) / 5)

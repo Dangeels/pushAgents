@@ -16,7 +16,7 @@ class Agent(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     tg_id: Mapped[int] = mapped_column(BigInteger, unique=True)
     nickname: Mapped[str] = mapped_column(String)
-    norm_rate: Mapped[int] = mapped_column(default=int(os.getenv('NORM', '15')))
+    norm_rate: Mapped[int] = mapped_column()
 
 
 class DailyMessage(Base):
@@ -38,6 +38,12 @@ class Admin(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(String(40))
     is_creator: Mapped[int] = mapped_column()
+
+
+class Norm(Base):
+    __tablename__ = 'norm_rate'
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    norm: Mapped[int] = mapped_column()
 
 
 async def async_main():
