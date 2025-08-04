@@ -44,6 +44,8 @@ class Norm(Base):
     __tablename__ = 'norm_rate'
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     norm: Mapped[int] = mapped_column()
+    salary: Mapped[int] = mapped_column()
+    bonuses: Mapped[int] = mapped_column()
 
 
 async def async_main():

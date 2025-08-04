@@ -112,12 +112,19 @@ async def all_daily_messages(current_date):
 async def get_norm():
     async with async_session() as session:
         norm = await session.scalar(select(Norm).where(Norm.id == 1))
-        return norm.norm
+        return norm
 
 
-async def set_new_norm(new_norm: int):
+async def set_new_norm(new_norm: int, salary: int | None = None, bonuses: int | None = None):
     async with async_session() as session:
-        await session.execute(update(Norm).where(Norm.id == 1).values(norm=new_norm))
+        async with session.begin():
+            existing = await session.scalar(select(Norm).where(Norm.id == 1).with_for_update())
+            if existing:
+                existing.norm = new_norm
+                existing.salary = salary or existing.salary
+                existing.bonuses = bonuses or existing.bonuses
+                session.add(existing)
+
         await session.commit()
 
 
@@ -162,7 +169,7 @@ async def delete_dialog(agent_username, client, current_date):
                                                     DailyMessage.date == current_date))
         await session.execute(update(DailyMessage)
                               .where(DailyMessage.tg_id == agent.tg_id, DailyMessage.date == current_date)
-                              .values(dialogs_count=max(daily_message.dialogs_count-1, 0))
+                              .values(dialogs_count=max(daily_message.dialogs_count - 1, 0))
                               )
         await session.execute(delete(Client).where(Client.username == client))
         await session.commit()
@@ -173,7 +180,7 @@ async def set_agent(from_user):
         agent = await session.scalar(select(Agent).where(Agent.tg_id == from_user.id))
         if not agent:
             norm = await get_norm()
-            session.add(Agent(tg_id=from_user.id, nickname=from_user.username, norm_rate=norm))
+            session.add(Agent(tg_id=from_user.id, nickname=from_user.username, norm_rate=norm.norm))
             await session.commit()
 
 
@@ -209,11 +216,12 @@ async def daily_results(current_date):
             for message in daily_messages:
                 old_norm_ = await session.scalar(select(Agent).where(Agent.tg_id == message.tg_id))
                 old_norm = old_norm_.norm_rate
-                norm = await get_norm()
+                all_norms = await get_norm()
+                norm = all_norms.norm
                 bonuses = 0
                 if message.dialogs_count >= old_norm:
-                    bonuses = int(os.getenv('BONUSES')) * int((message.dialogs_count - old_norm) / 5)
-                    salary = int(os.getenv('SALARY')) + bonuses
+                    bonuses = all_norms.bonuses * int((message.dialogs_count - old_norm) / 5)
+                    salary = all_norms.salary + bonuses
                     norm = norm - (message.dialogs_count - old_norm) % 5
                 else:
                     salary = 0
@@ -250,7 +258,7 @@ async def weekly_results():
     monday_str = monday.strftime("%Y-%m-%d")
     sunday_str = sunday.strftime("%Y-%m-%d")
 
-    async with async_session() as session:
+    async with (async_session() as session):
         try:
             result = await session.execute(
                 select(
@@ -276,11 +284,13 @@ async def weekly_results():
             else:
                 for row in rows:
                     tg_id, nickname, total_dialogs, total_salary = row
-                    report_lines.append(
-                        f"Агент: @{nickname}\n"
-                        f"Диалогов за неделю: {total_dialogs}\n"
-                        f"Зарплата за неделю: {total_salary} рублей"
-                    )
+                    if total_dialogs >= 100:
+                        text = f'Лучший работник недели по диалогам - бонус к зарплате 500 рублей\n'
+                        total_salary += 500
+                    text += (f"Агент: @{nickname}\n"
+                             f"Диалогов за неделю: {total_dialogs}\n"
+                             f"Зарплата за неделю: {total_salary} рублей")
+                    report_lines.append(text)
             return "\n\n".join(report_lines)
         except Exception as e:
             print(f"Ошибка в weekly_results: {e}")

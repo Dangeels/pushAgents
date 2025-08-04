@@ -161,7 +161,7 @@ async def all_daily_messages(message: Message):
     await message.answer(f'Сообщения за {current_date}. Количество: {count}\n'+'\n'.join(messages))
 
 
-@router.message(Command('set_new_norm'))  # /set_new_norm 20
+@router.message(Command('set_new_norm'))  # /set_new_norm [norm] [salary] [bonuses]
 async def set_new_norm(message: Message):
     if message.chat.type != 'private':
         return
@@ -170,7 +170,8 @@ async def set_new_norm(message: Message):
         await message.answer('Доступ запрещён')
         return
     try:
-        await req.set_new_norm(int(message.text.split()[1]))
+        x = [int(i) for i in message.text.split()[1:]]
+        await req.set_new_norm(*x)
         await message.answer('Норма успешно обновлена')
     except Exception:
         await message.answer('Неверный формат сообщения')
@@ -191,6 +192,7 @@ async def reset_norm(message: Message):
             norm = abs(int(message.text.split()[2]))
         else:
             norm = await req.get_norm()
+            norm = norm.norm
         agents = await req.all_agents()
         if username in agents[1]:
             await req.reset_norm(username, norm)
