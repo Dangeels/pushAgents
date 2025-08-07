@@ -290,7 +290,7 @@ async def weekly_results():
                              f"Диалогов за неделю: {total_dialogs}\n"
                              f"Зарплата за неделю: {total_salary} рублей")
                     report_lines.append(text)
-                report_lines[salaries.index(max(salaries))] += 'Лучший работник недели - бонус к зарплате +500 рублей'
+                report_lines[salaries.index(max(salaries))+1] += 'Лучший работник недели - бонус к зарплате +500 рублей'
             return "\n\n".join(report_lines)
         except Exception as e:
             print(f"Ошибка в weekly_results: {e}")
