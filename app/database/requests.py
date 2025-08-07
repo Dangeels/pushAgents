@@ -282,15 +282,15 @@ async def weekly_results():
             if not rows:
                 report_lines.append("Нет данных за указанный период.")
             else:
+                salaries = []
                 for row in rows:
                     tg_id, nickname, total_dialogs, total_salary = row
-                    if total_dialogs >= 100:
-                        text = f'Лучший работник недели по диалогам - бонус к зарплате 500 рублей\n'
-                        total_salary += 500
-                    text += (f"Агент: @{nickname}\n"
+                    salaries.append(total_salary)
+                    text = (f"Агент: @{nickname}\n"
                              f"Диалогов за неделю: {total_dialogs}\n"
                              f"Зарплата за неделю: {total_salary} рублей")
                     report_lines.append(text)
+                report_lines[salaries.index(max(salaries))] += 'Лучший работник недели - бонус к зарплате +500 рублей'
             return "\n\n".join(report_lines)
         except Exception as e:
             print(f"Ошибка в weekly_results: {e}")
