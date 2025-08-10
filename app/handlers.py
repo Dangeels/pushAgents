@@ -94,9 +94,10 @@ async def bot_help(message: Message):
 Команда /all_daily_messages - получить список всех диалогов за сегодня       
 Команда /all_time_messages - получить количество диалогов за всё время        
         
-Команда /set_new_norm [норма] [зарплата] [бонусы] - установить новую дневную норму для всех
-1) пример команды - /set_new_norm 25 400 100 
-установит дневную норму сообщений 25, дневную зп 400 и 100 рублей за каждые 5 диалогов сверх нормы
+Команда /set_new_norm [норма] [зарплата] [ежедневные бонусы] [бонус в конце недели за норму] [бонус лучшего агента] - установить новую дневную норму для всех
+1) пример команды - /set_new_norm 25 400 100 400 600
+установит дневную норму сообщений 25, дневную зп 400 и 100 рублей за каждые 5 диалогов сверх нормы, 
+400 рублей за ежедневное выполнение нормы в течение недели, 600 рублей за наибольшее количество диалогов за неделю
 2) пример команды - /set_new_norm 30 500
 установит дневную норму сообщений 30, дневную зп 500, бонусы оставит прежними
 3) пример команды - /set_new_norm 40
@@ -167,7 +168,7 @@ async def all_daily_messages(message: Message):
     await message.answer(f'Сообщения за {current_date}. Количество: {count}\n'+'\n'.join(messages))
 
 
-@router.message(Command('set_new_norm'))  # /set_new_norm [norm] [salary] [bonuses]
+@router.message(Command('set_new_norm'))  # /set_new_norm [norm] [salary] [bonuses] [week_bonuses] [best_agent]
 async def set_new_norm(message: Message):
     if message.chat.type != 'private':
         return

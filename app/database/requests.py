@@ -1,7 +1,7 @@
 import os
 import pytz
 from datetime import datetime, timedelta
-from sqlalchemy import select, update, delete, func
+from sqlalchemy import select, update, delete, func, case
 from app.database.models import async_session, Agent, DailyMessage, Client, Admin, Norm
 
 
@@ -115,7 +115,13 @@ async def get_norm():
         return norm
 
 
-async def set_new_norm(new_norm: int, salary: int | None = None, bonuses: int | None = None):
+async def set_new_norm(
+        new_norm: int,
+        salary: int | None = None,
+        bonuses: int | None = None,
+        weekly_bonuses: int | None = None,
+        best_week_bonus: int | None = None
+):
     async with async_session() as session:
         async with session.begin():
             existing = await session.scalar(select(Norm).where(Norm.id == 1).with_for_update())
@@ -123,6 +129,8 @@ async def set_new_norm(new_norm: int, salary: int | None = None, bonuses: int | 
                 existing.norm = new_norm
                 existing.salary = salary or existing.salary
                 existing.bonuses = bonuses or existing.bonuses
+                existing.week_norm_bonuses = weekly_bonuses or existing.week_norm_bonuses
+                existing.best_week_agent = best_week_bonus or existing.best_week_agent
                 session.add(existing)
 
         await session.commit()
@@ -251,48 +259,83 @@ async def get_week_date_range(current_date: datetime.date):
 async def weekly_results():
     msk_tz = pytz.timezone("Europe/Moscow")
     current_date = datetime.now(msk_tz).date()
-    if current_date.weekday() != 6:  # Fixed: 6 is Sunday, not 2
+
+    # Отчёт формируем только по воскресеньям (0=Пн … 6=Вс)
+    if current_date.weekday() != 6:
         return ""
 
+    # Предполагается, что возвращает date-объекты понедельника и воскресенья (включительно)
     monday, sunday = await get_week_date_range(current_date)
+
+    # В БД дата хранится как строка — используем ISO-формат
     monday_str = monday.strftime("%Y-%m-%d")
     sunday_str = sunday.strftime("%Y-%m-%d")
 
-    async with (async_session() as session):
+    period_human = f"{monday.strftime('%d.%m')} - {sunday.strftime('%d.%m')}"
+
+    async with async_session() as session:
         try:
-            result = await session.execute(
+            # Агрегат одним запросом:
+            # - total_dialogs: сумма диалогов
+            # - total_salary: сумма зарплаты
+            # - positive_days: число дней с зарплатой > 0 (норма выполнена)
+            stmt = (
                 select(
                     DailyMessage.tg_id,
                     Agent.nickname,
-                    func.sum(DailyMessage.dialogs_count).label("total_dialogs"),
-                    func.sum(DailyMessage.salary).label("total_salary")
+                    func.coalesce(func.sum(DailyMessage.dialogs_count), 0).label("total_dialogs"),
+                    func.coalesce(func.sum(DailyMessage.salary), 0).label("total_salary"),
+                    func.coalesce(
+                        func.sum(
+                            case((DailyMessage.salary > 0, 1), else_=0)
+                        ),
+                        0
+                    ).label("positive_days"),
                 )
                 .join(Agent, DailyMessage.tg_id == Agent.tg_id)
-                .where(DailyMessage.date >= monday_str, DailyMessage.date <= sunday_str)
+                .where(DailyMessage.date.between(monday_str, sunday_str))  # YYYY-MM-DD сравниваются корректно как строки
                 .group_by(DailyMessage.tg_id, Agent.nickname)
             )
+
+            result = await session.execute(stmt)
             rows = result.all()
 
-            mon = monday_str.split('-')
-            mon = f'{mon[2]}.{mon[1]}'
-            sun = sunday_str.split('-')
-            sun = f'{sun[2]}.{sun[1]}'
+            report_lines = [f"Итоговый отчет за неделю ({period_human}):"]
 
-            report_lines = [f"Итоговый отчет за неделю ({mon} - {sun}):"]
+            norm = await get_norm()
+
             if not rows:
                 report_lines.append("Нет данных за указанный период.")
             else:
-                salaries = []
-                for row in rows:
-                    tg_id, nickname, total_dialogs, total_salary = row
-                    salaries.append(total_salary)
-                    text = (f"Агент: @{nickname}\n"
-                             f"Диалогов за неделю: {total_dialogs}\n"
-                             f"Зарплата за неделю: {total_salary} рублей")
+                best_idx = None
+                best_salary = None
+
+                for tg_id, nickname, total_dialogs, total_salary, positive_days in rows:
+                    text = (
+                        f"Агент: @{nickname}\n"
+                        f"Диалогов за неделю: {total_dialogs}\n"
+                        f"Зарплата за неделю за диалоги: {total_salary} рублей"
+                    )
+
+                    # Бонус +300: все 7 дней недели зарплата > 0
+                    if positive_days == 7:
+                        text += f"\nБонус +{norm.week_norm_bonuses} рублей за ежедневное выполнение нормы"
+                        total_salary += norm.week_norm_bonuses
+
                     report_lines.append(text)
-                report_lines[salaries.index(max(salaries))+1] += 'Лучший работник недели - бонус к зарплате +500 рублей'
+
+                    if best_salary is None or total_salary > best_salary:
+                        best_salary = total_salary
+                        best_idx = len(report_lines) - 1  # индекс только что добавленной строки
+
+                if best_idx is not None:
+                    total_salary += norm.best_week_agent
+                    report_lines[best_idx] += (f"\nЛучший работник недели — бонус к зарплате +{norm.best_week_agent} рублей"
+                                               f"\nИтоговая зарплата: {total_salary}")
+
             return "\n\n".join(report_lines)
+
         except Exception as e:
-            print(f"Ошибка в weekly_results: {e}")
             await session.rollback()
+            print(f"Ошибка в weekly_results: {e}")
             return f"Ошибка при формировании отчета: {e}"

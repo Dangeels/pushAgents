@@ -46,6 +46,8 @@ class Norm(Base):
     norm: Mapped[int] = mapped_column()
     salary: Mapped[int] = mapped_column()
     bonuses: Mapped[int] = mapped_column()
+    week_norm_bonuses: Mapped[int] = mapped_column()
+    best_week_agent: Mapped[int] = mapped_column()
 
 
 async def async_main():
