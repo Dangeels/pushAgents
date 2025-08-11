@@ -329,9 +329,9 @@ async def weekly_results():
                         best_idx = len(report_lines) - 1  # индекс только что добавленной строки
 
                 if best_idx is not None:
-                    total_salary += norm.best_week_agent
+                    best_salary += norm.best_week_agent
                     report_lines[best_idx] += (f"\nЛучший работник недели — бонус к зарплате +{norm.best_week_agent} рублей"
-                                               f"\nИтоговая зарплата: {total_salary}")
+                                               f"\nИтоговая зарплата: {best_salary}")
 
             return "\n\n".join(report_lines)
 
