@@ -16,7 +16,8 @@ media_groups = set()
 async def all_admins(message: Message):
     if message.chat.type != 'private':
         return
-    if is_admin(message.from_user.username):
+    ad = await is_admin(message.from_user.username)
+    if ad[0]:
         admins = await req.all_admins()
         await message.answer('Список администраторов\n'+'\n'.join(admins[0]))
 
@@ -94,23 +95,6 @@ async def bot_help(message: Message):
 Команда /all_daily_messages - получить список всех диалогов за сегодня       
 Команда /all_time_messages - получить количество диалогов за всё время        
         
-Команда /set_new_norm [норма] [зарплата] [ежедневные бонусы] [бонус в конце недели за норму] [бонус лучшего агента] - установить новую дневную норму для всех
-1) пример команды - /set_new_norm 25 400 100 400 600
-установит дневную норму сообщений 25, дневную зп 400 и 100 рублей за каждые 5 диалогов сверх нормы, 
-400 рублей за ежедневное выполнение нормы в течение недели, 600 рублей за наибольшее количество диалогов за неделю
-2) пример команды - /set_new_norm 30 500
-установит дневную норму сообщений 30, дневную зп 500, бонусы оставит прежними
-3) пример команды - /set_new_norm 40
-установит дневную норму сообщений 40, зарплату и бонусы оставит прежними
-После команды через пробел указываются числа - новая норма, новая зарплата, новые бонусы
-Доступ к команде есть только у старших админов
-        
-Команда /reset_norm @username - сбросить/установить другую дневную норму у агента; 
-Пример использования: 
-● /reset_norm @username 20 - установит агенту @username дневную норму в 20 диалогов
-● /reset_norm @username - сбросит агенту @username дневную норму до базового значения (15)
-
-
 Команда /add_dialog @agent @client - добавить один диалог агенту, 
 ● где @agent указывается никнейм агента, 
 ● где @client указывается никнейм клиента из неправильного отчёта
@@ -126,6 +110,8 @@ async def bot_help(message: Message):
 Команда /all_admins - получить список всех администраторов 
 Команда /set_admin @username - добавить нового администратора
 Команда /delete_admin @username - удалить администратора
+
+Зарплата: 25 рублей за каждый диалог.
 """
         await message.answer(txt)
 
@@ -172,42 +158,16 @@ async def all_daily_messages(message: Message):
 async def set_new_norm(message: Message):
     if message.chat.type != 'private':
         return
-    ad = await is_admin(message.from_user.username)
-    if not ad[0] or ad[2] == 0:
-        await message.answer('Доступ запрещён')
-        return
-    try:
-        x = [int(i) for i in message.text.split()[1:]]
-        await req.set_new_norm(*x)
-        await message.answer('Норма успешно обновлена')
-    except Exception:
-        await message.answer(f'Неверный формат сообщения')
+    # Функция отключена в новой модели без норм и бонусов
+    await message.answer('Команда отключена: нормы и бонусы больше не используются')
 
 
 @router.message(Command('reset_norm'))  # сообщение формата /reset_norm nickname 15
 async def reset_norm(message: Message):
     if message.chat.type != 'private':
         return
-    ad = await is_admin(message.from_user.username)
-    if not ad[0]:
-        await message.answer('Доступ запрещён')
-        return
-    try:
-        username = message.text.split()[1]
-        username = username.strip('@')
-        if len(message.text.split()) == 3:
-            norm = abs(int(message.text.split()[2]))
-        else:
-            norm = await req.get_norm()
-            norm = norm.norm
-        agents = await req.all_agents()
-        if username in agents[1]:
-            await req.reset_norm(username, norm)
-            await message.answer(f'Дневная норма @{username} успешно сброшена до {norm}')
-        else:
-            await message.answer(f'Агента @{username} не существует')
-    except Exception:
-        await message.answer('Неверный формат сообщения')
+    # Функция отключена в новой модели без норм и бонусов
+    await message.answer('Команда отключена: нормы и бонусы больше не используются')
 
 
 @router.message(F.text.startswith('@'))  # сообщение формата  @username
@@ -319,20 +279,12 @@ async def day_res(bot):
     date_str = get_current_date()
     dct = await req.daily_results(date_str)
     res = []
-    done = {True: '(норма выполнена)', False: '(норма не выполнена)'}
     for key in dct.keys():
         if dct[key][1] == 0:
             continue
-        if dct[key][1] < dct[key][4]:
-            perenos = dct[key][1]
-        else:
-            perenos = (dct[key][1] - dct[key][4]) % 5
-
         txt = f"""Ник агента: @{dct[key][0]}
-Количество диалогов за день: {dct[key][1]}/{dct[key][4]} {done[dct[key][1] >= dct[key][4]]}
-Бонусы за день: {dct[key][2]} рублей
-Перенос диалогов на завтра: {perenos} (завтрашняя норма {dct[key][5]})
-Зарплата за день без учёта клиентов: {dct[key][3]} рублей
+Количество диалогов за день: {dct[key][1]}
+Зарплата за день: {dct[key][2]} рублей
 """
         res.append(txt)
 

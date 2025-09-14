@@ -1,8 +1,7 @@
-import os
 import pytz
 from datetime import datetime, timedelta
-from sqlalchemy import select, update, delete, func, case
-from app.database.models import async_session, Agent, DailyMessage, Client, Admin, Norm
+from sqlalchemy import select, update, delete, func
+from app.database.models import async_session, Agent, DailyMessage, Client, Admin
 
 
 async def is_admin(username):
@@ -24,7 +23,7 @@ async def delete_admin(from_user, username):
         username = username.strip('@')
         admin1 = await session.scalar(select(Admin).where(Admin.username == from_user.username))
         admin2 = await session.scalar(select(Admin).where(Admin.username == username))
-        if admin1.is_creator > admin2.is_creator:
+        if admin1 and admin2 and admin1.is_creator > admin2.is_creator:
             await session.execute(delete(Admin).where(Admin.username == username))
             await session.commit()
             return True
@@ -66,7 +65,7 @@ async def all_agents():
         agents = await session.scalars(select(Agent))
         for agent in agents:
             nicknames.append(agent.nickname)
-            res.append(f'Агент: @{agent.nickname}\nТекущая норма: {agent.norm_rate}')
+            res.append(f'Агент: @{agent.nickname}')
         return res, nicknames
 
 
@@ -99,48 +98,14 @@ async def all_daily_messages(current_date):
         messages = await session.scalars(select(DailyMessage).where(DailyMessage.date == current_date))
         for message in messages:
             agent = await session.scalar(select(Agent).where(Agent.tg_id == message.tg_id))
-            if message.dialogs_count % 10 == 1:
+            if message.dialogs_count % 10 == 1 and message.dialogs_count % 100 != 11:
                 soo = 'сообщение'
-            elif 2 <= message.dialogs_count % 10 <= 4:
+            elif 2 <= message.dialogs_count % 10 <= 4 and not (12 <= message.dialogs_count % 100 <= 14):
                 soo = 'сообщения'
             else:
                 soo = "сообщений"
             res.append(f'Агент @{agent.nickname} - {message.dialogs_count} {soo}')
         return res
-
-
-async def get_norm():
-    async with async_session() as session:
-        norm = await session.scalar(select(Norm).where(Norm.id == 1))
-        return norm
-
-
-async def set_new_norm(
-        new_norm: int,
-        salary: int | None = None,
-        bonuses: int | None = None,
-        weekly_bonuses: int | None = None,
-        best_week_bonus: int | None = None
-):
-    async with async_session() as session:
-        async with session.begin():
-            existing = await session.scalar(select(Norm).where(Norm.id == 1).with_for_update())
-            if existing:
-                existing.norm = new_norm
-                existing.salary = salary or existing.salary
-                existing.bonuses = bonuses or existing.bonuses
-                existing.week_norm_bonuses = weekly_bonuses or existing.week_norm_bonuses
-                existing.best_week_agent = best_week_bonus or existing.best_week_agent
-                session.add(existing)
-
-        await session.commit()
-
-
-async def reset_norm(username, norm):
-    async with async_session() as session:
-        await session.execute(update(Agent).where(Agent.nickname == username)
-                              .values(norm_rate=norm))
-        await session.commit()
 
 
 async def add_dialog(agent_username, client, current_date):
@@ -152,8 +117,8 @@ async def add_dialog(agent_username, client, current_date):
             daily_message = await session.scalar(select(DailyMessage)
                                                  .where(DailyMessage.tg_id == agent.tg_id,
                                                         DailyMessage.date == current_date))
-            client = await session.scalar(select(Client).where(Client.username == client))
-            if not client:
+            client_obj = await session.scalar(select(Client).where(Client.username == client))
+            if not client_obj:
                 session.add(Client(username=client))
             else:
                 return 'повтор'
@@ -165,7 +130,7 @@ async def add_dialog(agent_username, client, current_date):
                 ).values(dialogs_count=daily_message.dialogs_count + 1))
             await session.commit()
         except Exception as e:
-            print(f"Ошибка в count_daily_messages: {e}")
+            print(f"Ошибка в add_dialog: {e}")
             await session.rollback()
 
 
@@ -175,10 +140,11 @@ async def delete_dialog(agent_username, client, current_date):
         daily_message = await session.scalar(select(DailyMessage)
                                              .where(DailyMessage.tg_id == agent.tg_id,
                                                     DailyMessage.date == current_date))
-        await session.execute(update(DailyMessage)
-                              .where(DailyMessage.tg_id == agent.tg_id, DailyMessage.date == current_date)
-                              .values(dialogs_count=max(daily_message.dialogs_count - 1, 0))
-                              )
+        if daily_message:
+            await session.execute(update(DailyMessage)
+                                  .where(DailyMessage.tg_id == agent.tg_id, DailyMessage.date == current_date)
+                                  .values(dialogs_count=max(daily_message.dialogs_count - 1, 0))
+                                  )
         await session.execute(delete(Client).where(Client.username == client))
         await session.commit()
 
@@ -187,8 +153,7 @@ async def set_agent(from_user):
     async with async_session() as session:
         agent = await session.scalar(select(Agent).where(Agent.tg_id == from_user.id))
         if not agent:
-            norm = await get_norm()
-            session.add(Agent(tg_id=from_user.id, nickname=from_user.username, norm_rate=norm.norm))
+            session.add(Agent(tg_id=from_user.id, nickname=from_user.username, norm_rate=0))
             await session.commit()
 
 
@@ -222,25 +187,15 @@ async def daily_results(current_date):
         try:
             daily_messages = await session.scalars(select(DailyMessage).where(DailyMessage.date == current_date))
             for message in daily_messages:
-                old_norm_ = await session.scalar(select(Agent).where(Agent.tg_id == message.tg_id))
-                old_norm = old_norm_.norm_rate
-                all_norms = await get_norm()
-                norm = all_norms.norm
-                bonuses = 0
-                if message.dialogs_count >= old_norm:
-                    bonuses = all_norms.bonuses * int((message.dialogs_count - old_norm) / 5)
-                    salary = all_norms.salary + bonuses
-                    norm = norm - (message.dialogs_count - old_norm) % 5
-                else:
-                    salary = 0
-                    norm = old_norm - message.dialogs_count
+                agent = await session.scalar(select(Agent).where(Agent.tg_id == message.tg_id))
+                # Новая модель оплаты: 25 рублей за каждый диалог
+                salary = int(message.dialogs_count) * 25
 
-                await session.execute(update(Agent).where(Agent.tg_id == message.tg_id).values(norm_rate=norm))
                 await session.execute(update(DailyMessage)
                                       .where(DailyMessage.tg_id == message.tg_id, DailyMessage.date == message.date)
                                       .values(salary=salary))
 
-                dct[message.tg_id] = [old_norm_.nickname, message.dialogs_count, bonuses, salary, old_norm, norm]
+                dct[message.tg_id] = [agent.nickname, message.dialogs_count, salary]
             await session.commit()
             return dct
         except Exception as e:
@@ -264,10 +219,8 @@ async def weekly_results():
     if current_date.weekday() != 6:
         return ""
 
-    # Предполагается, что возвращает date-объекты понедельника и воскресенья (включительно)
     monday, sunday = await get_week_date_range(current_date)
 
-    # В БД дата хранится как строка — используем ISO-формат
     monday_str = monday.strftime("%Y-%m-%d")
     sunday_str = sunday.strftime("%Y-%m-%d")
 
@@ -275,25 +228,14 @@ async def weekly_results():
 
     async with async_session() as session:
         try:
-            # Агрегат одним запросом:
-            # - total_dialogs: сумма диалогов
-            # - total_salary: сумма зарплаты
-            # - positive_days: число дней с зарплатой > 0 (норма выполнена)
             stmt = (
                 select(
                     DailyMessage.tg_id,
                     Agent.nickname,
                     func.coalesce(func.sum(DailyMessage.dialogs_count), 0).label("total_dialogs"),
-                    func.coalesce(func.sum(DailyMessage.salary), 0).label("total_salary"),
-                    func.coalesce(
-                        func.sum(
-                            case((DailyMessage.salary > 0, 1), else_=0)
-                        ),
-                        0
-                    ).label("positive_days"),
                 )
                 .join(Agent, DailyMessage.tg_id == Agent.tg_id)
-                .where(DailyMessage.date.between(monday_str, sunday_str))  # YYYY-MM-DD сравниваются корректно как строки
+                .where(DailyMessage.date.between(monday_str, sunday_str))
                 .group_by(DailyMessage.tg_id, Agent.nickname)
             )
 
@@ -302,36 +244,17 @@ async def weekly_results():
 
             report_lines = [f"Итоговый отчет за неделю ({period_human}):"]
 
-            norm = await get_norm()
-
             if not rows:
                 report_lines.append("Нет данных за указанный период.")
             else:
-                best_idx = None
-                best_salary = None
-
-                for tg_id, nickname, total_dialogs, total_salary, positive_days in rows:
+                for tg_id, nickname, total_dialogs in rows:
+                    total_salary = int(total_dialogs) * 25
                     text = (
                         f"Агент: @{nickname}\n"
                         f"Диалогов за неделю: {total_dialogs}\n"
-                        f"Зарплата за неделю за диалоги: {total_salary} рублей"
+                        f"Зарплата за неделю: {total_salary} рублей"
                     )
-
-                    # Бонус +300: все 7 дней недели зарплата > 0
-                    if positive_days == 7:
-                        text += f"\nБонус +{norm.week_norm_bonuses} рублей за ежедневное выполнение нормы"
-                        total_salary += norm.week_norm_bonuses
-
                     report_lines.append(text)
-
-                    if best_salary is None or total_salary > best_salary:
-                        best_salary = total_salary
-                        best_idx = len(report_lines) - 1  # индекс только что добавленной строки
-
-                if best_idx is not None:
-                    best_salary += norm.best_week_agent
-                    report_lines[best_idx] += (f"\nЛучший работник недели — бонус к зарплате +{norm.best_week_agent} рублей"
-                                               f"\nИтоговая зарплата: {best_salary}")
 
             return "\n\n".join(report_lines)
 

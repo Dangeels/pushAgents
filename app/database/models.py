@@ -1,7 +1,6 @@
 from sqlalchemy import BigInteger, String
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_engine
-import os
 
 engine = create_async_engine(url='sqlite+aiosqlite:///db.sqlite3', echo=False)
 async_session = async_sessionmaker(engine)
@@ -16,7 +15,8 @@ class Agent(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     tg_id: Mapped[int] = mapped_column(BigInteger, unique=True)
     nickname: Mapped[str] = mapped_column(String)
-    norm_rate: Mapped[int] = mapped_column()
+    # Поле сохраняем для совместимости, но оно больше не используется
+    norm_rate: Mapped[int] = mapped_column(default=0)
 
 
 class DailyMessage(Base):
@@ -38,16 +38,6 @@ class Admin(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(String(40))
     is_creator: Mapped[int] = mapped_column()
-
-
-class Norm(Base):
-    __tablename__ = 'norm_rate'
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    norm: Mapped[int] = mapped_column()
-    salary: Mapped[int] = mapped_column()
-    bonuses: Mapped[int] = mapped_column()
-    week_norm_bonuses: Mapped[int] = mapped_column()
-    best_week_agent: Mapped[int] = mapped_column()
 
 
 async def async_main():
