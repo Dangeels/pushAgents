@@ -37,8 +37,10 @@ async def on_startup(dispatcher):
     """Настройка планировщика при запуске бота."""
     # Ежедневный отчет в 23:59
     scheduler.add_job(handlers.day_res, "cron", hour=23, minute=59, args=[bot])
-    # Еженедельный отчет в воскресенье в 23:59
+    # Еженедельный промежуточный отчет в воскресенье в 23:59:30
     scheduler.add_job(handlers.week_res, "cron", day_of_week="sun", hour=23, minute=59, second=30, args=[bot])
+    # Итоговый отчёт за 2 недели в воскресенье в 23:59:45
+    scheduler.add_job(handlers.biweek_res, "cron", day_of_week="sun", hour=23, minute=59, second=45, args=[bot])
     scheduler.start()
     print("Планировщик запущен")
 

@@ -2,6 +2,8 @@ import pytz
 from datetime import datetime, timedelta
 from sqlalchemy import select, update, delete, func
 from app.database.models import async_session, Agent, DailyMessage, Client, Admin
+from app.database.models import AgentGroup, AgentGroupMember
+from app.database.models import Settings, AgentAdjustment
 
 
 async def is_admin(username):
@@ -86,10 +88,77 @@ async def all_time_messages():
         return sum([message.dialogs_count for message in messages])
 
 
+# ===== Настройки выплат и норм =====
+async def _get_settings(session):
+    st = await session.scalar(select(Settings))
+    if not st:
+        st = Settings()
+        session.add(st)
+        await session.commit()
+        await session.refresh(st)
+    return st
+
+
+async def get_settings():
+    async with async_session() as session:
+        return await _get_settings(session)
+
+
+async def set_rate_per_dialog(new_rate: int):
+    async with async_session() as session:
+        st = await _get_settings(session)
+        st.rate_per_dialog = int(new_rate)
+        await session.commit()
+
+
+async def set_norms_enabled(enabled: bool):
+    async with async_session() as session:
+        st = await _get_settings(session)
+        st.norms_enabled = 1 if enabled else 0
+        await session.commit()
+
+
+async def set_global_norm_rate(norm_rate: int):
+    async with async_session() as session:
+        st = await _get_settings(session)
+        st.global_norm_rate = int(norm_rate)
+        await session.commit()
+
+
+async def set_agent_norm(nickname: str, norm_rate: int):
+    async with async_session() as session:
+        ag = await session.scalar(select(Agent).where(Agent.nickname == nickname))
+        if ag:
+            ag.norm_rate = int(norm_rate)
+            await session.commit()
+            return True
+        return False
+
+
+# ===== Корректировки диалогов =====
+async def add_adjustment(nickname: str, delta: int, date_str: str, reason: str = ""):
+    async with async_session() as session:
+        ag = await session.scalar(select(Agent).where(Agent.nickname == nickname))
+        if not ag:
+            return False
+        # Сохраняем дельту. Для вычитания укажем отрицательное число снаружи.
+        session.add(AgentAdjustment(tg_id=ag.tg_id, date=date_str, delta=int(delta), reason=reason or ""))
+        await session.commit()
+        return True
+
+
+# ===== Вспомогательные вычисления =====
 async def count_day(current_date):
     async with async_session() as session:
-        count = await session.scalars(select(DailyMessage).where(DailyMessage.date == current_date))
-        return sum([int(i.dialogs_count) for i in count])
+        # Сумма диалогов
+        total_dialogs = await session.scalar(
+            select(func.coalesce(func.sum(DailyMessage.dialogs_count), 0)).where(DailyMessage.date == current_date)
+        )
+        # Сумма корректировок
+        total_adj = await session.scalar(
+            select(func.coalesce(func.sum(AgentAdjustment.delta), 0)).where(AgentAdjustment.date == current_date)
+        )
+        return int(total_dialogs or 0) + int(total_adj or 0)
 
 
 async def all_daily_messages(current_date):
@@ -108,6 +177,48 @@ async def all_daily_messages(current_date):
         return res
 
 
+# ===== Управление группами агентов =====
+async def ensure_group(title: str):
+    async with async_session() as session:
+        grp = await session.scalar(select(AgentGroup).where(AgentGroup.title == title))
+        if not grp:
+            grp = AgentGroup(title=title)
+            session.add(grp)
+            await session.commit()
+            await session.refresh(grp)
+        return grp
+
+
+async def add_member_to_group(title: str, agent_nickname: str):
+    async with async_session() as session:
+        grp = await session.scalar(select(AgentGroup).where(AgentGroup.title == title))
+        if not grp:
+            grp = AgentGroup(title=title)
+            session.add(grp)
+            await session.commit()
+            await session.refresh(grp)
+        exists = await session.scalar(
+            select(AgentGroupMember).where(
+                AgentGroupMember.group_id == grp.id,
+                AgentGroupMember.agent_nickname == agent_nickname
+            )
+        )
+        if not exists:
+            session.add(AgentGroupMember(group_id=grp.id, agent_nickname=agent_nickname))
+            await session.commit()
+
+
+async def list_groups():
+    async with async_session() as session:
+        result = {}
+        groups = await session.scalars(select(AgentGroup))
+        for g in groups:
+            members = await session.scalars(select(AgentGroupMember).where(AgentGroupMember.group_id == g.id))
+            result[g.title] = [m.agent_nickname for m in members]
+        return result
+
+
+# ===== Бизнес-логика: отчёты по группам =====
 async def add_dialog(agent_username, client, current_date):
     async with async_session() as session:
         try:
@@ -181,22 +292,78 @@ async def count_daily_messages(from_user, current_date, message):
             await session.rollback()
 
 
+# ===== Общий расчёт по периодам с учётом норм и корректировок =====
+async def _group_totals_with_rates(session, start_str: str, end_str: str):
+    st = await _get_settings(session)
+    # Суммы диалогов по агентам
+    dialogs_sub = (
+        select(
+            DailyMessage.tg_id.label('tg_id'),
+            func.coalesce(func.sum(DailyMessage.dialogs_count), 0).label('dlg')
+        )
+        .where(DailyMessage.date.between(start_str, end_str))
+        .group_by(DailyMessage.tg_id)
+        .subquery()
+    )
+    # Суммы корректировок по агентам
+    adj_sub = (
+        select(
+            AgentAdjustment.tg_id.label('tg_id'),
+            func.coalesce(func.sum(AgentAdjustment.delta), 0).label('adj')
+        )
+        .where(AgentAdjustment.date.between(start_str, end_str))
+        .group_by(AgentAdjustment.tg_id)
+        .subquery()
+    )
+
+    coalesced_group = func.coalesce(AgentGroup.title, Agent.nickname)
+
+    # Данные по каждому агенту
+    rows = (
+        await session.execute(
+            select(
+                Agent.tg_id,
+                Agent.nickname,
+                Agent.norm_rate,
+                coalesced_group.label('group_title'),
+                func.coalesce(dialogs_sub.c.dlg, 0).label('dialogs'),
+                func.coalesce(adj_sub.c.adj, 0).label('adjust')
+            )
+            .outerjoin(dialogs_sub, dialogs_sub.c.tg_id == Agent.tg_id)
+            .outerjoin(adj_sub, adj_sub.c.tg_id == Agent.tg_id)
+            .outerjoin(AgentGroupMember, AgentGroupMember.agent_nickname == Agent.nickname)
+            .outerjoin(AgentGroup, AgentGroup.id == AgentGroupMember.group_id)
+        )
+    ).all()
+
+    # Агрегируем по группам с применением ставок
+    by_group = {}
+    for tg_id, nickname, agent_norm, group_title, dlg, adj in rows:
+        total_dialogs = max(0, int(dlg or 0) + int(adj or 0))
+        # Определяем ставку
+        if st.norms_enabled or (agent_norm and int(agent_norm) > 0):
+            rate = int(agent_norm) if agent_norm and int(agent_norm) > 0 else int(st.global_norm_rate)
+        else:
+            rate = int(st.rate_per_dialog)
+        salary = total_dialogs * rate
+        key = group_title or nickname
+        if key not in by_group:
+            by_group[key] = {'dialogs': 0, 'salary': 0}
+        by_group[key]['dialogs'] += total_dialogs
+        by_group[key]['salary'] += salary
+
+    # Приводим к итоговому виде
+    result = {}
+    for title, vals in by_group.items():
+        result[title] = [title, int(vals['dialogs']), int(vals['salary'])]
+    return result
+
+
 async def daily_results(current_date):
     dct = {}
     async with async_session() as session:
         try:
-            daily_messages = await session.scalars(select(DailyMessage).where(DailyMessage.date == current_date))
-            for message in daily_messages:
-                agent = await session.scalar(select(Agent).where(Agent.tg_id == message.tg_id))
-                # Новая модель оплаты: 25 рублей за каждый диалог
-                salary = int(message.dialogs_count) * 25
-
-                await session.execute(update(DailyMessage)
-                                      .where(DailyMessage.tg_id == message.tg_id, DailyMessage.date == message.date)
-                                      .values(salary=salary))
-
-                dct[message.tg_id] = [agent.nickname, message.dialogs_count, salary]
-            await session.commit()
+            dct = await _group_totals_with_rates(session, current_date, current_date)
             return dct
         except Exception as e:
             print(f"Ошибка в daily_results: {e}")
@@ -211,6 +378,12 @@ async def get_week_date_range(current_date: datetime.date):
     return monday, sunday
 
 
+async def get_biweek_date_range(current_date: datetime.date):
+    monday_this, sunday_this = await get_week_date_range(current_date)
+    monday_prev = monday_this - timedelta(days=7)
+    return monday_prev, sunday_this
+
+
 async def weekly_results():
     msk_tz = pytz.timezone("Europe/Moscow")
     current_date = datetime.now(msk_tz).date()
@@ -220,45 +393,83 @@ async def weekly_results():
         return ""
 
     monday, sunday = await get_week_date_range(current_date)
-
     monday_str = monday.strftime("%Y-%m-%d")
     sunday_str = sunday.strftime("%Y-%m-%d")
-
     period_human = f"{monday.strftime('%d.%m')} - {sunday.strftime('%d.%m')}"
 
     async with async_session() as session:
         try:
-            stmt = (
-                select(
-                    DailyMessage.tg_id,
-                    Agent.nickname,
-                    func.coalesce(func.sum(DailyMessage.dialogs_count), 0).label("total_dialogs"),
-                )
-                .join(Agent, DailyMessage.tg_id == Agent.tg_id)
-                .where(DailyMessage.date.between(monday_str, sunday_str))
-                .group_by(DailyMessage.tg_id, Agent.nickname)
-            )
-
-            result = await session.execute(stmt)
-            rows = result.all()
-
-            report_lines = [f"Итоговый отчет за неделю ({period_human}):"]
-
+            rows = await _group_totals_with_rates(session, monday_str, sunday_str)
+            report_lines = [f"<b>ПРОМЕЖУТОЧНЫЙ НЕДЕЛЬНЫЙ ОТЧЁТ ПО ДИАЛОГАМ</b> ({period_human}):"]
             if not rows:
                 report_lines.append("Нет данных за указанный период.")
             else:
-                for tg_id, nickname, total_dialogs in rows:
-                    total_salary = int(total_dialogs) * 25
+                for group_title, (title, dialogs, salary) in rows.items():
                     text = (
-                        f"Агент: @{nickname}\n"
-                        f"Диалогов за неделю: {total_dialogs}\n"
-                        f"Зарплата за неделю: {total_salary} рублей"
+                        f"Агент: {title}\n"
+                        f"Диалогов за неделю: {dialogs}\n"
+                        f"Зарплата за неделю: {salary} рублей"
                     )
                     report_lines.append(text)
-
             return "\n\n".join(report_lines)
-
         except Exception as e:
             await session.rollback()
             print(f"Ошибка в weekly_results: {e}")
+            return f"Ошибка при формировании отчета: {e}"
+
+
+async def biweekly_results():
+    msk_tz = pytz.timezone("Europe/Moscow")
+    current_date = datetime.now(msk_tz).date()
+
+    # Формируем по воскресеньям
+    if current_date.weekday() != 6:
+        return ""
+
+    start, end = await get_biweek_date_range(current_date)
+    start_str = start.strftime("%Y-%m-%d")
+    end_str = end.strftime("%Y-%m-%d")
+    period_human = f"{start.strftime('%d.%m')} - {end.strftime('%d.%m')}"
+
+    async with async_session() as session:
+        try:
+            st = await _get_settings(session)
+            rows = await _group_totals_with_rates(session, start_str, end_str)
+
+            # Определяем победителя по диалогам
+            winner = None
+            winner_dialogs = -1
+            for title, (_, dialogs, _) in rows.items():
+                if dialogs > winner_dialogs:
+                    winner = title
+                    winner_dialogs = dialogs
+
+            report_lines = [f"<b>ИТОГОВЫЙ ОТЧЁТ ЗА 2 НЕДЕЛИ</b> ({period_human}):"]
+            if not rows:
+                report_lines.append("Нет данных за указанный период.")
+            else:
+                for title, (_, dialogs, salary) in rows.items():
+                    total_salary = salary
+                    if winner and title == winner and int(st.top_bonus) > 0:
+                        total_salary = salary + int(st.top_bonus)
+                        text = (
+                            f"Агент: {title}\n"
+                            f"Диалогов за 2 недели: {dialogs}\n"
+                            f"Зарплата за 2 недели: {total_salary} рублей (включая премию {int(st.top_bonus)} рублей)"
+                        )
+                    else:
+                        text = (
+                            f"Агент: {title}\n"
+                            f"Диалогов за 2 недели: {dialogs}\n"
+                            f"Зарплата за 2 недели: {total_salary} рублей"
+                        )
+                    report_lines.append(text)
+                if winner:
+                    report_lines.append(
+                        f"Премия за наибольшее количество диалогов: {int(st.top_bonus)} рублей — {winner}"
+                    )
+            return "\n\n".join(report_lines)
+        except Exception as e:
+            await session.rollback()
+            print(f"Ошибка в biweekly_results: {e}")
             return f"Ошибка при формировании отчета: {e}"
