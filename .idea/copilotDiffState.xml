@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CopilotDiffPersistence">
+    <option name="pendingDiffs">
+      <map>
+        <entry key="$PROJECT_DIR$/test_link_account.py">
+          <value>
+            <PendingDiffInfo>
+              <option name="filePath" value="$PROJECT_DIR$/test_link_account.py" />
+              <option name="updatedContent" value="import asyncio&#10;&#10;from app.database.models import async_main, async_session, Agent, AgentAccount&#10;from app.database.requests import link_account, get_norm&#10;from sqlalchemy import select&#10;&#10;&#10;async def run():&#10;    await async_main()&#10;    # гарантируем наличие базовой нормы&#10;    await get_norm()&#10;&#10;    async with async_session() as session:&#10;        # создаём тестового агента, если нет&#10;        ag = await session.scalar(select(Agent).where(Agent.nickname == 'agent1'))&#10;        if not ag:&#10;            ag = Agent(tg_id=111111, nickname='agent1', norm_rate=15)&#10;            session.add(ag)&#10;            await session.commit()&#10;&#10;    ok, msg = await link_account('agent1', 'acc_stub')&#10;    print('link_account 1:', ok, msg)&#10;&#10;    # повторно привязываем тот же аккаунт — должно пройти без ошибок&#10;    ok2, msg2 = await link_account('agent1', 'acc_stub')&#10;    print('link_account 2:', ok2, msg2)&#10;&#10;    # проверим, что аккаунт появился в БД&#10;    async with async_session() as session:&#10;        aa = await session.scalar(select(AgentAccount).where(AgentAccount.tg_username == 'acc_stub'))&#10;        print('agent_account id:', aa.id if aa else None, 'agent_id:', aa.agent_id if aa else None)&#10;&#10;&#10;if __name__ == '__main__':&#10;    asyncio.run(run())&#10;" />
+            </PendingDiffInfo>
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+</project>

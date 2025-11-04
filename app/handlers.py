@@ -16,7 +16,8 @@ media_groups = set()
 async def all_admins(message: Message):
     if message.chat.type != 'private':
         return
-    if is_admin(message.from_user.username):
+    ad = await is_admin(message.from_user.username)
+    if ad[0]:
         admins = await req.all_admins()
         await message.answer('Список администраторов\n'+'\n'.join(admins[0]))
 
@@ -90,44 +91,87 @@ async def bot_help(message: Message):
     ad = await is_admin(message.from_user.username)
     if ad[0]:
         txt = """
-        Команда /all_agents - получить список всех работающих агентов
-Команда /all_daily_messages - получить список всех диалогов за сегодня       
-Команда /all_time_messages - получить количество диалогов за всё время        
-        
-Команда /set_new_norm [норма] [зарплата] [ежедневные бонусы] [бонус в конце недели за норму] [бонус лучшего агента] - установить новую дневную норму для всех
-1) пример команды - /set_new_norm 25 400 100 400 600
-установит дневную норму сообщений 25, дневную зп 400 и 100 рублей за каждые 5 диалогов сверх нормы, 
-400 рублей за ежедневное выполнение нормы в течение недели, 600 рублей за наибольшее количество диалогов за неделю
-2) пример команды - /set_new_norm 30 500
-установит дневную норму сообщений 30, дневную зп 500, бонусы оставит прежними
-3) пример команды - /set_new_norm 40
-установит дневную норму сообщений 40, зарплату и бонусы оставит прежними
-После команды через пробел указываются числа - новая норма, новая зарплата, новые бонусы
-Доступ к команде есть только у старших админов
-        
-Команда /reset_norm @username - сбросить/установить другую дневную норму у агента; 
-Пример использования: 
-● /reset_norm @username 20 - установит агенту @username дневную норму в 20 диалогов
-● /reset_norm @username - сбросит агенту @username дневную норму до базового значения (15)
+<b>СПРАВКА по командам</b>
 
+<b>Формат параметров:</b>
+- &lt;значение&gt; — обязательный параметр
+- [значение] — опциональный параметр
 
-Команда /add_dialog @agent @client - добавить один диалог агенту, 
-● где @agent указывается никнейм агента, 
-● где @client указывается никнейм клиента из неправильного отчёта
-● отправляется одним сообщением, прикреплять фото/видео к сообщению не требуется
-                                  
-Команда /delete_dialog @agent @client - удалить один диалог агента из базы данных, 
-● где @agent указывается никнейм агента, 
-● где @client указывается никнейм клиента из неправильного отчёта
-● удалять можно только диалоги за текущий день
+<b>1) Диалоги и корректировки</b>
+• /add_dialog @agent @client — добавить 1 диалог агенту за текущий день.
+  Пример: /add_dialog @ivan @client123. Клиента добавит в базу, если его там нет; медиа прикреплять не нужно.
+• /delete_dialog @agent @client — удалить 1 диалог за текущий день у агента и удалить клиента из базы clients.
+  Ограничение: удаляются только диалоги за текущий день.
+• /sub_dialogs @agent &lt;N&gt; — вычесть N диалогов у агента за сегодня без удаления клиентов; зарплата пересчитается автоматически.
+  Пример: /sub_dialogs @ivan 3.
+• /set_client @username — пометить клиента обработанным (повторные упоминания не засчитываются).
+• /all_daily_messages — показать список диалогов по агентам за сегодня и их суммарное количество.
+• /all_time_messages — показать суммарное количество диалогов за всё время.
 
-Команда /set_client @username - добавить обработанного клиента в базу данных
- 
-Команда /all_admins - получить список всех администраторов 
-Команда /set_admin @username - добавить нового администратора
-Команда /delete_admin @username - удалить администратора
+<b>2) Нормы и расчёт оплаты</b>
+• /set_new_norm &lt;норма&gt; [зарплата] [ежедневный_бонус_за_5] [недельный_бонус_за_норму] [премия_топа]
+  — установить базовую дневную норму и опционально зарплату/бонусы.
+  Примеры:
+    /set_new_norm 25 400 100 400 600 — норма 25, дневная ЗП 400, +100 за каждые 5 сверх нормы, +400 за неделю выполнения, +600 топ-агенту.
+    /set_new_norm 30 500 — норма 30, ЗП 500, остальные значения без изменений.
+    /set_new_norm 40 — только обновить норму, остальное без изменений.
+• /agent_norms @agent on|off — включить или выключить нормы для конкретного агента.
+• /norms_global on|off — глобально включить или выключить нормы (доступно только старшим админам).
+• /set_dialog_price &lt;стоимость&gt; — установить цену одного диалога, если нормы отключены (по умолчанию 20).
+• /set_top_premium &lt;сумма&gt; — установить премию агенту с наибольшим числом диалогов за 2 недели.
+
+<b>3) Агенты и аккаунты</b>
+• /all_agents — показать всех агентов, их аккаунты и текущую норму.
+• /link_account @agent @account — привязать аккаунт (по username) к агенту. Переносит между агентами при необходимости;
+  если у аккаунта ещё нет tg_id, создаётся заглушка до первого отчёта.
+• /unlink_account @agent @account — отвязать аккаунт от агента. Если это последний аккаунт, агент будет удалён.
+• /set_primary @agent @account — задать primary-аккаунт агента (у аккаунта должен быть tg_id).
+• /list_accounts @agent — показать все аккаунты агента (primary помечен).
+• /all_accounts — показать все аккаунты всех агентов (primary помечен).
+• /delete_agent @agent — полностью удалить агента и все его аккаунты.
+
+<b>4) Администрирование</b>
+• /all_admins — показать список администраторов.
+• /set_admin @username — добавить администратора.
+• /delete_admin @username — удалить администратора (доступ зависит от уровня прав).
 """
         await message.answer(txt)
+
+
+@router.message(Command('agent_norms'))  # /agent_norms @agent on|off
+async def agent_norms(message: Message):
+    if message.chat.type != 'private':
+        return
+    ad = await is_admin(message.from_user.username)
+    if not ad[0]:
+        await message.answer('Доступ запрещён')
+        return
+    try:
+        _, agent_username, state = message.text.split()
+        state = state.lower().strip()
+        enabled = state in ['on', '1', 'true', 'вкл', 'enable']
+        await req.set_agent_norms(agent_username.strip('@'), enabled)
+        await message.answer(f"Нормы для @{agent_username.strip('@')} {'включены' if enabled else 'выключены'}")
+    except Exception:
+        await message.answer('Неверный формат. Пример: /agent_norms @agent on|off')
+
+
+@router.message(Command('norms_global'))  # /norms_global on|off
+async def norms_global(message: Message):
+    if message.chat.type != 'private':
+        return
+    ad = await is_admin(message.from_user.username)
+    if not ad[0] or ad[2] == 0:
+        await message.answer('Доступ запрещён')
+        return
+    try:
+        _, state = message.text.split()
+        state = state.lower().strip()
+        enabled = state in ['on', '1', 'true', 'вкл', 'enable']
+        await req.set_global_norms(enabled)
+        await message.answer(f"Глобальные нормы {'включены' if enabled else 'выключены'}")
+    except Exception:
+        await message.answer('Неверный формат. Пример: /norms_global on|off')
 
 
 @router.message(Command('all_agents'))
@@ -140,6 +184,20 @@ async def all_agents(message: Message):
         return
     agents = await req.all_agents()
     await message.answer('\n\n'.join(agents[0]))
+
+
+@router.message(Command('all_accounts'))
+async def all_accounts(message: Message):
+    if message.chat.type != 'private':
+        return
+    ad = await is_admin(message.from_user.username)
+    if not ad[0]:
+        await message.answer('Доступ запрещён')
+        return
+    accounts = await req.all_accounts()
+    text = '\n'.join(accounts) or 'Нет данных.'
+    for i in range(0, len(text), 4096):
+        await message.answer(text[i:i+4096])
 
 
 @router.message(Command('all_time_messages'))
@@ -208,6 +266,120 @@ async def reset_norm(message: Message):
             await message.answer(f'Агента @{username} не существует')
     except Exception:
         await message.answer('Неверный формат сообщения')
+
+
+@router.message(Command('link_account'))  # /link_account @agent @account
+async def link_account(message: Message):
+    if message.chat.type != 'private':
+        return
+    ad = await is_admin(message.from_user.username)
+    if not ad[0]:
+        await message.answer('Доступ запрещён')
+        return
+    try:
+        _, agent_username, account_username = message.text.split()
+        ok, text = await req.link_account(agent_username.strip('@'), account_username.strip('@'))
+        await message.answer(text)
+    except Exception:
+        await message.answer('Неверный формат. Пример: /link_account @agent @account')
+
+
+@router.message(Command('unlink_account'))  # /unlink_account @agent @account
+async def unlink_account(message: Message):
+    if message.chat.type != 'private':
+        return
+    ad = await is_admin(message.from_user.username)
+    if not ad[0]:
+        await message.answer('Доступ запрещён')
+        return
+    try:
+        _, agent_username, account_username = message.text.split()
+        ok, text = await req.unlink_account(agent_username.strip('@'), account_username.strip('@'))
+        await message.answer(text)
+    except Exception:
+        await message.answer('Неверный формат. Пример: /unlink_account @agent @account')
+
+
+@router.message(Command('set_primary'))  # /set_primary @agent @account
+async def set_primary(message: Message):
+    if message.chat.type != 'private':
+        return
+    ad = await is_admin(message.from_user.username)
+    if not ad[0]:
+        await message.answer('Доступ запрещён')
+        return
+    try:
+        _, agent_username, account_username = message.text.split()
+        ok, text = await req.set_primary_account(agent_username.strip('@'), account_username.strip('@'))
+        await message.answer(text)
+    except Exception:
+        await message.answer('Неверный формат. Пример: /set_primary @agent @account')
+
+
+# Новый обработчик: показать привязанные аккаунты агента
+@router.message(Command('list_accounts'))  # /list_accounts @agent
+async def list_accounts(message: Message):
+    if message.chat.type != 'private':
+        return
+    ad = await is_admin(message.from_user.username)
+    if not ad[0]:
+        await message.answer('Доступ запрещён')
+        return
+    try:
+        parts = message.text.split()
+        if len(parts) != 2:
+            await message.answer('Неверный формат. Пример: /list_accounts @agent')
+            return
+        agent_username = parts[1].strip('@')
+        accounts = await req.list_accounts(agent_username)
+        if not accounts:
+            await message.answer(f'Агент @{agent_username} не найден или у него нет привязанных аккаунтов')
+            return
+        await message.answer('Аккаунты агента @' + agent_username + ' (primary помечен):\n- ' + '\n- '.join(accounts))
+    except Exception:
+        await message.answer('Неверный формат. Пример: /list_accounts @agent')
+
+
+@router.message(Command('delete_agent'))  # /delete_agent @agent
+async def delete_agent(message: Message):
+    if message.chat.type != 'private':
+        return
+    ad = await is_admin(message.from_user.username)
+    if not ad[0]:
+        await message.answer('Доступ запрещён')
+        return
+    try:
+        _, agent_username = message.text.split()
+        ok, text = await req.delete_agent(agent_username.strip('@'))
+        await message.answer(text)
+    except Exception:
+        await message.answer('Неверный формат. Пример: /delete_agent @agent')
+
+
+@router.message(Command('sub_dialogs'))  # /sub_dialogs @agent N
+async def sub_dialogs(message: Message):
+    if message.chat.type != 'private':
+        return
+    ad = await is_admin(message.from_user.username)
+    if not ad[0]:
+        await message.answer('Доступ запрещён')
+        return
+    try:
+        _, agent_username, num = message.text.split()
+        agent_username = agent_username.strip('@')
+        amount = int(num)
+        if amount <= 0:
+            await message.answer('Число должно быть положительным')
+            return
+        date_str = get_current_date()
+        ok, text, _sub = await req.subtract_dialogs(agent_username, date_str, amount)
+        # Пересчитаем зарплату за текущий день после корректировки
+        await req.daily_results(date_str)
+        await message.answer(text)
+    except ValueError:
+        await message.answer('Неверный формат. Пример: /sub_dialogs @agent 3')
+    except Exception as e:
+        await message.answer(f'Ошибка: {e}')
 
 
 @router.message(F.text.startswith('@'))  # сообщение формата  @username
@@ -318,21 +490,58 @@ async def clean_processed_media_groups(media_group_id):
 async def day_res(bot):
     date_str = get_current_date()
     dct = await req.daily_results(date_str)
+    # Получаем глобальные настройки норм (зарплата/бонусы/включены ли нормы)
+    norm_cfg = await req.get_norm()
     res = []
     done = {True: '(норма выполнена)', False: '(норма не выполнена)'}
     for key in dct.keys():
-        if dct[key][1] == 0:
+        # dct[key] = [nickname, total, bonuses, salary, old_norm, new_norm]
+        nickname = dct[key][0]
+        total = dct[key][1]
+        bonuses = dct[key][2]
+        salary = dct[key][3]
+        old_norm = dct[key][4]
+        new_norm = dct[key][5]
+        if total == 0:
             continue
-        if dct[key][1] < dct[key][4]:
-            perenos = dct[key][1]
-        else:
-            perenos = (dct[key][1] - dct[key][4]) % 5
 
-        txt = f"""Ник агента: @{dct[key][0]}
-Количество диалогов за день: {dct[key][1]}/{dct[key][4]} {done[dct[key][1] >= dct[key][4]]}
-Бонусы за день: {dct[key][2]} рублей
-Перенос диалогов на завтра: {perenos} (завтрашняя норма {dct[key][5]})
-Зарплата за день без учёта клиентов: {dct[key][3]} рублей
+        # Проверяем включены ли нормы глобально и у конкретного агента
+        try:
+            agent_norm_enabled = await req.is_agent_norms_enabled(nickname)
+        except Exception:
+            agent_norm_enabled = True
+        norms_active = bool(norm_cfg.norms_enabled_global) and bool(agent_norm_enabled)
+
+        # Перенос диалогов показываем ТОЛЬКО если нормы активны
+        perenos_line = ''
+        if norms_active:
+            if total < old_norm:
+                perenos = total
+            else:
+                perenos = (total - old_norm) % 5
+            perenos_line = f"\nПеренос диалогов на завтра: {perenos} (завтрашняя норма {new_norm})"
+
+        # Формула расчёта зарплаты
+        if norms_active:
+            if total >= old_norm:
+                groups = (total - old_norm) // 5
+                formula = f"Формула: {norm_cfg.salary} + {norm_cfg.bonuses} × {groups} = {salary}"
+            else:
+                formula = f"Формула: 0 (норма {old_norm}, выполнено {total})"
+        else:
+            formula = f"Формула: {norm_cfg.dialog_price} × {total} = {salary}"
+
+        # Строка количества диалогов: без нормы и статуса при отключённых нормах
+        if norms_active:
+            count_line = f"Количество диалогов за день: {total}/{old_norm} {done[total >= old_norm]}"
+        else:
+            count_line = f"Количество диалогов за день: {total}"
+
+        txt = f"""Ник агента: @{nickname}
+{count_line}
+Бонусы за день: {bonuses} рублей{perenos_line}
+Зарплата за день без учёта клиентов: {salary} рублей
+{formula}
 """
         res.append(txt)
 
@@ -345,6 +554,14 @@ async def day_res(bot):
 
 
 async def week_res(bot):
+    # Промежуточный отчёт за неделю
     report = await req.weekly_results()
-    for i in range(0, len(report), 4096):
-        await bot.send_message(chat_id=os.getenv('CHAT_ID'), text=report[i:i+4096])
+    if report:
+        for i in range(0, len(report), 4096):
+            await bot.send_message(chat_id=os.getenv('CHAT_ID'), text=report[i:i+4096])
+
+    # Итоговый отчёт за 2 недели
+    report2 = await req.biweekly_results()
+    if report2:
+        for i in range(0, len(report2), 4096):
+            await bot.send_message(chat_id=os.getenv('CHAT_ID'), text=report2[i:i+4096])

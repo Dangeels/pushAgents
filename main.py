@@ -3,8 +3,9 @@ import asyncio
 
 from aiogram import Bot, Dispatcher
 from aiogram.types import Message
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from aiogram.client.default import DefaultBotProperties
 
 import app.handlers as handlers
 from app.handlers import router
@@ -13,9 +14,20 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-bot = Bot(token=os.getenv("TOKEN"))
+# Включаем HTML-разметку по умолчанию для сообщений (нужна для жирных заголовков отчётов)
+bot = Bot(token=os.getenv("TOKEN"), default=DefaultBotProperties(parse_mode='HTML'))
 dp = Dispatcher()
 scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
+
+
+@dp.message(Command("test_daily"))
+async def test_daily_report(message: Message):
+    await handlers.day_res(bot)
+
+
+@dp.message(Command("test_weekly"))
+async def test_weekly_report(message: Message):
+    await handlers.week_res(bot)
 
 
 @dp.message(CommandStart())
