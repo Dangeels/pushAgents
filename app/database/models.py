@@ -16,6 +16,8 @@ class Agent(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     tg_id: Mapped[int | None] = mapped_column(BigInteger, unique=True, nullable=True)
     nickname: Mapped[str] = mapped_column(String)
+    # Человекочитаемое имя агента ("Название агента"), независимое от @username
+    display_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     norm_rate: Mapped[int] = mapped_column()
     # Признак включённых норм для агента (1=включены, 0=выключены)
     norms_enabled: Mapped[int] = mapped_column(default=1)
@@ -86,13 +88,14 @@ async def _migrate_agents_tg_nullable():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 tg_id BIGINT UNIQUE,
                 nickname VARCHAR,
+                display_name VARCHAR(100),
                 norm_rate INTEGER,
                 norms_enabled INTEGER DEFAULT 1
             );
             """
         )
         await conn.exec_driver_sql(
-            "INSERT INTO agents_new (id, tg_id, nickname, norm_rate, norms_enabled) SELECT id, tg_id, nickname, norm_rate, 1 FROM agents;"
+            "INSERT INTO agents_new (id, tg_id, nickname, display_name, norm_rate, norms_enabled) SELECT id, tg_id, nickname, nickname, norm_rate, 1 FROM agents;"
         )
         await conn.exec_driver_sql("DROP TABLE agents;")
         await conn.exec_driver_sql("ALTER TABLE agents_new RENAME TO agents;")
@@ -123,6 +126,17 @@ async def _migrate_add_dialog_price():
             await conn.exec_driver_sql("ALTER TABLE norm_rate ADD COLUMN dialog_price INTEGER DEFAULT 20")
 
 
+async def _migrate_add_display_name():
+    """Добавляет столбец display_name в agents и заполняет его текущим nickname при отсутствии."""
+    async with engine.begin() as conn:
+        info = await conn.exec_driver_sql("PRAGMA table_info(agents)")
+        cols = [r[1] for r in info.fetchall()] if info else []
+        if 'display_name' not in cols:
+            await conn.exec_driver_sql("ALTER TABLE agents ADD COLUMN display_name VARCHAR(100)")
+            # Бэкофилл значением nickname
+            await conn.exec_driver_sql("UPDATE agents SET display_name = nickname WHERE display_name IS NULL")
+
+
 async def async_main():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -131,6 +145,7 @@ async def async_main():
     await _migrate_agents_tg_nullable()
     await _migrate_add_norms_flags()
     await _migrate_add_dialog_price()
+    await _migrate_add_display_name()
 
     # Backfill: гарантируем запись в agent_accounts для каждого агента с tg_id
     from sqlalchemy import select

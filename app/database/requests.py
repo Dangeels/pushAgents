@@ -58,6 +58,27 @@ async def set_admin(username1):
             await session.commit()
 
 
+# ===== РЕЗОЛВЕР АГЕНТА: по @username ИЛИ по display_name =====
+async def _get_agent_by_ident(session, ident: str) -> Agent | None:
+    ident = (ident or '').strip()
+    if not ident:
+        return None
+    # 1) Попытка по нику (@username)
+    nick = ident.lstrip('@')
+    ag = await session.scalar(select(Agent).where(Agent.nickname == nick))
+    if ag:
+        return ag
+    # 2) Если не начинается с @ — пробуем по названию (display_name), регистронезависимо
+    if not ident.startswith('@'):
+        low = ident.lower()
+        ag = await session.scalar(select(Agent).where(func.lower(Agent.display_name) == low))
+        if ag:
+            return ag
+    # 3) Фолбэк: совпадение по нику без @ (на случай, если пользователь ввёл ник без @)
+    ag = await session.scalar(select(Agent).where(Agent.nickname == ident))
+    return ag
+
+
 async def all_agents():
     async with async_session() as session:
         res = []
@@ -75,7 +96,8 @@ async def all_agents():
                     tag = f"{tag} (primary)"
                 acc_list.append(tag)
             acc_str = (", ".join(acc_list)) or "-"
-            res.append(f'Агент: @{agent.nickname}\nАккаунты: {acc_str}\nТекущая норма: {agent.norm_rate}')
+            name = agent.display_name or f"@{agent.nickname}"
+            res.append(f'Агент: {name} (@{agent.nickname})\nАккаунты: {acc_str}\nТекущая норма: {agent.norm_rate}')
         return res, nicknames
 
 
@@ -107,15 +129,15 @@ async def all_daily_messages(current_date):
         res = []
         # Суммируем по агенту через join к AgentAccount
         stmt = (
-            select(Agent.nickname, func.coalesce(func.sum(DailyMessage.dialogs_count), 0))
+            select(Agent.nickname, Agent.display_name, func.coalesce(func.sum(DailyMessage.dialogs_count), 0))
             .select_from(DailyMessage)
             .join(AgentAccount, DailyMessage.tg_id == AgentAccount.tg_id)
             .join(Agent, AgentAccount.agent_id == Agent.id)
             .where(DailyMessage.date == literal(current_date))
-            .group_by(Agent.id, Agent.nickname)
+            .group_by(Agent.id, Agent.nickname, Agent.display_name)
         )
         rows = (await session.execute(stmt)).all()
-        for nickname, dialogs_count in rows:
+        for nickname, display_name, dialogs_count in rows:
             dcount = int(dialogs_count or 0)
             if dcount % 10 == 1:
                 soo = 'сообщение'
@@ -123,7 +145,9 @@ async def all_daily_messages(current_date):
                 soo = 'сообщения'
             else:
                 soo = "сообщений"
-            res.append(f'Агент @{nickname} - {dcount} {soo}')
+            name = display_name or f"@{nickname}"
+            # В конце оставляем число на предпоследнем месте для совместимости парсинга
+            res.append(f'Агент {name} (@{nickname}) - {dcount} {soo}')
         return res
 
 
@@ -162,11 +186,15 @@ async def set_top_premium(amount: int):
         await session.commit()
 
 
-async def set_agent_norms(username: str, enabled: bool):
+async def set_agent_norms(agent_ident: str, enabled: bool):
     async with async_session() as session:
-        username = username.strip('@')
-        await session.execute(update(Agent).where(Agent.nickname == username).values(norms_enabled=1 if enabled else 0))
+        agent = await _get_agent_by_ident(session, agent_ident)
+        if not agent:
+            await session.commit()
+            return False
+        await session.execute(update(Agent).where(Agent.id == agent.id).values(norms_enabled=1 if enabled else 0))
         await session.commit()
+        return True
 
 
 async def set_global_norms(enabled: bool):
@@ -209,16 +237,15 @@ async def set_new_norm(
         await session.commit()
 
 
-async def reset_norm(username, norm):
+async def reset_norm(agent_ident: str, norm: int) -> bool:
     async with async_session() as session:
-        await session.execute(update(Agent).where(Agent.nickname == username)
-                              .values(norm_rate=norm))
+        agent = await _get_agent_by_ident(session, agent_ident)
+        if not agent:
+            await session.commit()
+            return False
+        await session.execute(update(Agent).where(Agent.id == agent.id).values(norm_rate=norm))
         await session.commit()
-
-
-async def _get_agent_by_username(session, username: str) -> Agent | None:
-    username = username.strip('@')
-    return await session.scalar(select(Agent).where(Agent.nickname == username))
+        return True
 
 
 async def _get_account_by_username(session, username: str) -> AgentAccount | None:
@@ -245,12 +272,12 @@ async def _sync_all_nicknames(session):
             await session.execute(update(Agent).where(Agent.id == ag.id).values(nickname=acc.tg_username))
 
 
-async def link_account(agent_username: str, account_username: str):
+async def link_account(agent_ident: str, account_username: str):
     async with async_session() as session:
         try:
-            agent = await _get_agent_by_username(session, agent_username)
+            agent = await _get_agent_by_ident(session, agent_ident)
             if not agent:
-                return False, f"Агент @{agent_username.strip('@')} не найден"
+                return False, f"Агент {agent_ident} не найден"
 
             acc = await _get_account_by_username(session, account_username)
             # Если есть заглушка/аккаунт по username — переносим
@@ -263,7 +290,7 @@ async def link_account(agent_username: str, account_username: str):
                     await _sync_nickname_with_primary(session, agent.id)
                     await _sync_all_nicknames(session)
                     await session.commit()
-                    return True, f"Аккаунт @{account_username.strip('@')} уже привязан к агенту @{agent.nickname}"
+                    return True, f"Аккаунт @{account_username.strip('@')} уже привязан к агенту {agent.display_name or '@'+agent.nickname} (@{agent.nickname})"
 
                 # Переносим аккаунт
                 acc.agent_id = agent.id
@@ -311,7 +338,7 @@ async def link_account(agent_username: str, account_username: str):
                 await _sync_all_nicknames(session)
 
                 await session.commit()
-                return True, f"Аккаунт @{account_username.strip('@')} привязан к агенту @{agent.nickname}"
+                return True, f"Аккаунт @{account_username.strip('@')} привязан к агенту {agent.display_name or '@'+agent.nickname} (@{agent.nickname})"
 
             # Если аккаунта ещё нет — создадим заглушку по username
             session.add(AgentAccount(agent_id=agent.id, tg_id=None, tg_username=account_username.strip('@')))
@@ -319,15 +346,15 @@ async def link_account(agent_username: str, account_username: str):
             await _sync_nickname_with_primary(session, agent.id)
             await _sync_all_nicknames(session)
             await session.commit()
-            return True, f"Аккаунт @{account_username.strip('@')} добавлен к агенту @{agent.nickname} (tg_id появится после первого отчёта)"
+            return True, f"Аккаунт @{account_username.strip('@')} добавлен к агенту {agent.display_name or '@'+agent.nickname} (@{agent.nickname}) (tg_id появится после первого отчёта)"
         except Exception as e:
             await session.rollback()
             return False, f"Ошибка привязки аккаунта: {e}"
 
 
-async def list_accounts(agent_username: str):
+async def list_accounts(agent_ident: str):
     async with async_session() as session:
-        agent = await _get_agent_by_username(session, agent_username)
+        agent = await _get_agent_by_ident(session, agent_ident)
         if not agent:
             return []
         accs = await session.scalars(select(AgentAccount).where(AgentAccount.agent_id == agent.id))
@@ -340,19 +367,19 @@ async def list_accounts(agent_username: str):
         return out
 
 
-async def unlink_account(agent_username: str, account_username: str):
+async def unlink_account(agent_ident: str, account_username: str):
     async with async_session() as session:
         try:
-            agent = await _get_agent_by_username(session, agent_username)
+            agent = await _get_agent_by_ident(session, agent_ident)
             if not agent:
-                return False, f"Агент @{agent_username.strip('@')} не найден"
+                return False, f"Агент {agent_ident} не найден"
 
             acc = await _get_account_by_username(session, account_username)
             if not acc:
                 return False, f"Аккаунт @{account_username.strip('@')} не найден"
 
             if acc.agent_id != agent.id:
-                return False, f"Аккаунт @{account_username.strip('@')} не привязан к агенту @{agent.nickname}"
+                return False, f"Аккаунт @{account_username.strip('@')} не привязан к агенту {agent.display_name or '@'+agent.nickname} (@{agent.nickname})"
 
             # Если отвязываем primary — переключим primary на другой аккаунт агента, если доступен
             if acc.tg_id and agent.tg_id and acc.tg_id == agent.tg_id:
@@ -389,37 +416,37 @@ async def unlink_account(agent_username: str, account_username: str):
             await _sync_all_nicknames(session)
             await session.commit()
             if agent_deleted_note:
-                return True, f"Аккаунт @{account_username.strip('@')} отвязан от агента @{agent.nickname}{agent_deleted_note}"
+                return True, f"Аккаунт @{account_username.strip('@')} отвязан от агента {agent.display_name or '@'+agent.nickname} (@{agent.nickname}){agent_deleted_note}"
             else:
-                return True, f"Аккаунт @{account_username.strip('@')} отвязан от агента @{agent.nickname}"
+                return True, f"Аккаунт @{account_username.strip('@')} отвязан от агента {agent.display_name or '@'+agent.nickname} (@{agent.nickname})"
         except Exception as e:
             await session.rollback()
             return False, f"Ошибка отвязки аккаунта: {e}"
 
 
-async def set_primary_account(agent_username: str, account_username: str):
+async def set_primary_account(agent_ident: str, account_username: str):
     """Устанавливает primary-аккаунт агента.
     1) Гарантирует, что аккаунт привязан к указанному агенту (переносит при необходимости)
     2) Требует, чтобы у аккаунта был tg_id (иначе сообщает об ошибке)
     3) Устанавливает agent.tg_id = acc.tg_id и обновляет agent.nickname на tg_username primary
     """
     # Сначала гарантируем привязку (в т.ч. перенос между агентами)
-    ok, _msg = await link_account(agent_username, account_username)
+    ok, _msg = await link_account(agent_ident, account_username)
     if not ok:
         return False, _msg
 
     async with async_session() as session:
         try:
-            agent = await _get_agent_by_username(session, agent_username)
+            agent = await _get_agent_by_ident(session, agent_ident)
             if not agent:
-                return False, f"Агент @{agent_username.strip('@')} не найден"
+                return False, f"Агент {agent_ident} не найден"
 
             acc = await _get_account_by_username(session, account_username)
             if not acc:
                 return False, f"Аккаунт @{account_username.strip('@')} не найден"
 
             if acc.agent_id != agent.id:
-                return False, f"Аккаунт @{account_username.strip('@')} не привязан к агенту @{agent.nickname}"
+                return False, f"Аккаунт @{account_username.strip('@')} не привязан к агенту {agent.display_name or '@'+agent.nickname} (@{agent.nickname})"
 
             if not acc.tg_id:
                 return False, f"У аккаунта @{account_username.strip('@')} нет tg_id. Нельзя назначить primary до первого отчёта."
@@ -435,19 +462,18 @@ async def set_primary_account(agent_username: str, account_username: str):
             await _sync_all_nicknames(session)
 
             await session.commit()
-            return True, f"Primary-аккаунт агента @{acc.tg_username or agent.nickname} установлен: @{account_username.strip('@')}"
+            return True, f"Primary-аккаунт агента {agent.display_name or '@'+agent.nickname} (@{acc.tg_username or agent.nickname}) установлен: @{account_username.strip('@')}"
         except Exception as e:
             await session.rollback()
             return False, f"Ошибка установки primary: {e}"
 
 
-async def add_dialog(agent_username, client, current_date):
+async def add_dialog(agent_ident, client, current_date):
     async with async_session() as session:
         try:
-            # Добавляем диалог к аккаунту агента
-            agent = await session.scalar(select(Agent).where(Agent.nickname == agent_username))
+            agent = await _get_agent_by_ident(session, agent_ident)
             if not agent:
-                return 'not_agent'
+                return 'not_agent', None
 
             # выбираем primary tg_id агента или любой доступный аккаунт с tg_id
             primary_tg_id = agent.tg_id
@@ -460,7 +486,7 @@ async def add_dialog(agent_username, client, current_date):
                 if replacement:
                     primary_tg_id = replacement
                 else:
-                    return 'not_agent'
+                    return 'not_agent', None
 
             daily_message = await session.scalar(select(DailyMessage)
                                                  .where(DailyMessage.tg_id == primary_tg_id,
@@ -469,7 +495,7 @@ async def add_dialog(agent_username, client, current_date):
             if not client_row:
                 session.add(Client(username=client))
             else:
-                return 'повтор'
+                return 'повтор', agent.nickname
             if not daily_message:
                 session.add(DailyMessage(tg_id=primary_tg_id, date=current_date, dialogs_count=1))
             else:
@@ -477,16 +503,19 @@ async def add_dialog(agent_username, client, current_date):
                     DailyMessage.tg_id == daily_message.tg_id, DailyMessage.date == daily_message.date
                 ).values(dialogs_count=daily_message.dialogs_count + 1))
             await session.commit()
+            return 'ok', agent.nickname
         except Exception as e:
             print(f"Ошибка в add_dialog: {e}")
             await session.rollback()
+            return 'error', None
 
 
-async def delete_dialog(agent_username, client, current_date):
+async def delete_dialog(agent_ident, client, current_date):
     async with async_session() as session:
-        agent = await session.scalar(select(Agent).where(Agent.nickname == agent_username))
+        agent = await _get_agent_by_ident(session, agent_ident)
         if not agent:
-            return
+            await session.commit()
+            return 'not_agent', None
         # Уменьшаем на основном аккаунте
         daily_message = await session.scalar(select(DailyMessage)
                                              .where(DailyMessage.tg_id == agent.tg_id,
@@ -501,6 +530,7 @@ async def delete_dialog(agent_username, client, current_date):
                                   )
         await session.execute(delete(Client).where(Client.username == client))
         await session.commit()
+        return 'ok', agent.nickname
 
 
 async def set_agent(from_user):
@@ -526,7 +556,8 @@ async def set_agent(from_user):
 
         # Иначе создаём нового агента и привязку
         norm = await get_norm()
-        new_agent = Agent(tg_id=from_user.id, nickname=from_user.username or str(from_user.id), norm_rate=norm.norm)
+        base_nick = from_user.username or str(from_user.id)
+        new_agent = Agent(tg_id=from_user.id, nickname=base_nick, display_name=base_nick, norm_rate=norm.norm)
         session.add(new_agent)
         await session.flush()
         session.add(AgentAccount(agent_id=new_agent.id, tg_id=from_user.id, tg_username=from_user.username))
@@ -566,6 +597,7 @@ async def daily_results(current_date):
                 select(
                     Agent.id,
                     Agent.nickname,
+                    Agent.display_name,
                     Agent.norm_rate,
                     Agent.norms_enabled,
                     func.coalesce(func.sum(DailyMessage.dialogs_count), 0).label('total')
@@ -574,14 +606,14 @@ async def daily_results(current_date):
                 .join(AgentAccount, Agent.id == AgentAccount.agent_id)
                 .join(DailyMessage, DailyMessage.tg_id == AgentAccount.tg_id)
                 .where(DailyMessage.date == literal(current_date))
-                .group_by(Agent.id, Agent.nickname, Agent.norm_rate, Agent.norms_enabled)
+                .group_by(Agent.id, Agent.nickname, Agent.display_name, Agent.norm_rate, Agent.norms_enabled)
             )
             rows = (await session.execute(stmt)).all()
 
             all_norms = await get_norm()
             norms_global = int(all_norms.norms_enabled_global or 0)
 
-            for agent_id, nickname, old_norm, agent_norms_enabled, total in rows:
+            for agent_id, nickname, display_name, old_norm, agent_norms_enabled, total in rows:
                 bonuses = 0
                 # Если нормы отключены глобально или у агента — зарплата = диалоги * dialog_price, норму не трогаем
                 if norms_global == 0 or int(agent_norms_enabled or 0) == 0:
@@ -624,7 +656,7 @@ async def daily_results(current_date):
                                               .where(DailyMessage.tg_id == any_dm.tg_id, DailyMessage.date == literal(current_date))
                                               .values(salary=salary))
 
-                dct[agent_id] = [nickname, int(total), int(bonuses), int(salary), int(old_norm), int(new_norm)]
+                dct[agent_id] = [nickname, (display_name or ''), int(total), int(bonuses), int(salary), int(old_norm), int(new_norm)]
 
             await session.commit()
             return dct
@@ -667,6 +699,7 @@ async def weekly_results():
                 select(
                     Agent.id,
                     Agent.nickname,
+                    Agent.display_name,
                     func.coalesce(func.sum(DailyMessage.dialogs_count), 0).label("total_dialogs"),
                     func.coalesce(func.sum(DailyMessage.salary), 0).label("total_salary"),
                     func.coalesce(
@@ -680,7 +713,7 @@ async def weekly_results():
                 .join(AgentAccount, Agent.id == AgentAccount.agent_id)
                 .join(DailyMessage, DailyMessage.tg_id == AgentAccount.tg_id)
                 .where(DailyMessage.date.between(monday_str, sunday_str))
-                .group_by(Agent.id, Agent.nickname)
+                .group_by(Agent.id, Agent.nickname, Agent.display_name)
             )
 
             result = await session.execute(stmt)
@@ -693,16 +726,17 @@ async def weekly_results():
             if not rows:
                 report_lines.append("Нет данных за указанный период.")
             else:
-                for agent_id, nickname, total_dialogs, total_salary, positive_days in rows:
+                for agent_id, nickname, display_name, total_dialogs, total_salary, positive_days in rows:
+                    name = display_name or f"@{nickname}"
                     text = (
-                        f"Агент: @{nickname}\n"
+                        f"Агент: {name} (@{nickname})\n"
                         f"Диалогов за неделю: {total_dialogs}\n"
                         f"Зарплата за неделю за диалоги: {total_salary} рублей"
                     )
 
                     if positive_days == 7:
-                        text += f"\nБонус +{norm.week_norm_bonuses} рублей за ежедневное выполнение нормы"
-                        total_salary += norm.week_norm_bonuses
+                        text += f"\nБонус +{norm.week_norm_bонусы} рублей за ежедневное выполнение нормы"
+                        total_salary += norm.week_norm_bонусы
 
                     report_lines.append(text)
 
@@ -744,6 +778,7 @@ async def biweekly_results():
                 select(
                     Agent.id,
                     Agent.nickname,
+                    Agent.display_name,
                     func.coalesce(func.sum(DailyMessage.dialogs_count), 0).label("total_dialogs"),
                     func.coalesce(func.sum(DailyMessage.salary), 0).label("total_salary"),
                 )
@@ -751,7 +786,7 @@ async def biweekly_results():
                 .join(AgentAccount, Agent.id == AgentAccount.agent_id)
                 .join(DailyMessage, DailyMessage.tg_id == AgentAccount.tg_id)
                 .where(DailyMessage.date.between(start_str, end_str))
-                .group_by(Agent.id, Agent.nickname)
+                .group_by(Agent.id, Agent.nickname, Agent.display_name)
             )
 
             rows = (await session.execute(stmt)).all()
@@ -762,22 +797,23 @@ async def biweekly_results():
                 lines.append("Нет данных за указанный период.")
             else:
                 # Определим топ по диалогам
-                top_agent = None  # (nickname, total_dialogs, total_salary)
-                for _id, nickname, total_dialogs, total_salary in rows:
+                top_agent = None  # (nickname, display_name, total_dialogs, total_salary)
+                for _id, nickname, display_name, total_dialogs, total_salary in rows:
+                    name = display_name or f"@{nickname}"
                     lines.append(
-                        f"Агент: @{nickname}\n"
+                        f"Агент: {name} (@{nickname})\n"
                         f"Диалогов за 2 недели: {total_dialogs}\n"
                         f"Зарплата за 2 недели за диалоги: {total_salary} рублей"
                     )
-                    if (top_agent is None) or (total_dialogs > top_agent[1]):
-                        top_agent = (nickname, int(total_dialogs), int(total_salary))
+                    if (top_agent is None) or (total_dialogs > top_agent[2]):
+                        top_agent = (nickname, name, int(total_dialogs), int(total_salary))
 
                 # Премия за наибольшее количество диалогов за 2 недели
                 norm = await get_norm()
                 if top_agent and int(norm.best_week_agent or 0) > 0:
-                    final_salary = top_agent[2] + int(norm.best_week_agent)
+                    final_salary = top_agent[3] + int(norm.best_week_agent)
                     lines.append(
-                        f"Премия за наибольшее количество диалогов: @{top_agent[0]} +{norm.best_week_agent} рублей\n"
+                        f"Премия за наибольшее количество диалогов: {top_agent[1]} (@{top_agent[0]}) +{norm.best_week_agent} рублей\n"
                         f"Итоговая зарплата победителя: {final_salary}"
                     )
 
@@ -788,19 +824,19 @@ async def biweekly_results():
             return f"Ошибка при формировании 2-недельного отчёта: {e}"
 
 
-async def delete_agent(agent_username: str):
+async def delete_agent(agent_ident: str):
     """Полностью удаляет агента и все его записи в agent_accounts."""
     async with async_session() as session:
         try:
-            agent = await _get_agent_by_username(session, agent_username)
+            agent = await _get_agent_by_ident(session, agent_ident)
             if not agent:
-                return False, f"Агент @{agent_username.strip('@')} не найден"
+                return False, f"Агент {agent_ident} не найден"
             # Сначала удаляем все аккаунты агента
             await session.execute(delete(AgentAccount).where(AgentAccount.agent_id == agent.id))
             # Затем удаляем самого агента
             await session.execute(delete(Agent).where(Agent.id == agent.id))
             await session.commit()
-            return True, f"Агент @{agent.nickname} удалён"
+            return True, f"Агент {agent.display_name or '@'+agent.nickname} (@{agent.nickname}) удалён"
         except Exception as e:
             await session.rollback()
             return False, f"Ошибка удаления агента: {e}"
@@ -819,7 +855,8 @@ async def all_accounts():
             label = f"@{acc.tg_username}" if acc.tg_username else (str(acc.tg_id) if acc.tg_id else "&lt;без username&gt;")
             is_primary = bool(acc.tg_id and ag.tg_id and acc.tg_id == ag.tg_id)
             suffix = " (primary)" if is_primary else ""
-            out.append(f"{label}{suffix} — агент @{ag.nickname}")
+            name = ag.display_name or f"@{ag.nickname}"
+            out.append(f"{label}{suffix} — агент {name} (@{ag.nickname})")
         return out
 
 
@@ -830,7 +867,7 @@ async def is_agent_norms_enabled(username: str) -> bool:
         return bool(val) if val is not None else True
 
 
-async def subtract_dialogs(agent_username: str, current_date: str, amount: int) -> tuple[bool, str, int]:
+async def subtract_dialogs(agent_ident: str, current_date: str, amount: int) -> tuple[bool, str, int]:
     """Уменьшает суммарное количество диалогов у агента за указанную дату на amount.
     Не трогает таблицу clients. Распределяет вычитание по строкам DailyMessage агента.
     Возвращает (ok, message, actually_subtracted).
@@ -840,10 +877,9 @@ async def subtract_dialogs(agent_username: str, current_date: str, amount: int) 
 
     async with async_session() as session:
         try:
-            agent_username = agent_username.strip('@')
-            agent = await session.scalar(select(Agent).where(Agent.nickname == agent_username))
+            agent = await _get_agent_by_ident(session, agent_ident)
             if not agent:
-                return False, f"Агент @{agent_username} не найден", 0
+                return False, f"Агент {agent_ident} не найден", 0
 
             # Все строки отчётов агента за дату по всем аккаунтам
             dm_rows = await session.scalars(
@@ -881,3 +917,19 @@ async def subtract_dialogs(agent_username: str, current_date: str, amount: int) 
         except Exception as e:
             await session.rollback()
             return False, f"Ошибка вычитания диалогов: {e}", 0
+
+
+async def set_agent_display_name(agent_ident: str, display_name: str) -> tuple[bool, str]:
+    """Устанавливает человекочитаемое имя (Название агента)"""
+    async with async_session() as session:
+        try:
+            agent = await _get_agent_by_ident(session, agent_ident)
+            if not agent:
+                return False, f"Агент {agent_ident} не найден"
+            agent.display_name = display_name.strip()
+            session.add(agent)
+            await session.commit()
+            return True, f"Название агента обновлено: {agent.display_name} (@{agent.nickname})"
+        except Exception as e:
+            await session.rollback()
+            return False, f"Ошибка сохранения названия агента: {e}"
