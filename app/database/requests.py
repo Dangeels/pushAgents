@@ -681,9 +681,10 @@ async def weekly_results():
     if current_date.weekday() != 6:
         return ""
 
-    # Чередование: недельный отчёт публикуем только в нечётные ISO-недели
+    # Чередование: недельный отчёт публикуем теперь в ЧЁТНЫЕ ISO-недели (сдвиг графика)
     iso_week = current_date.isocalendar()[1]
-    if iso_week % 2 == 0:
+    # было if iso_week % 2 == 0:
+    if iso_week % 2 != 0:
         return ""
 
     monday, sunday = await get_week_date_range(current_date)
@@ -757,9 +758,10 @@ async def biweekly_results():
     if current_date.weekday() != 6:
         return ""
 
-    # Чередование: двухнедельный отчёт публикуем только в чётные ISO-недели
+    # Чередование: двухнедельный отчёт публикуем теперь в НЕЧЁТНЫЕ ISO-недели (сдвиг графика)
     iso_week = current_date.isocalendar()[1]
-    if iso_week % 2 == 1:
+    # было if iso_week % 2 == 1:
+    if iso_week % 2 == 0:
         return ""
 
     # Две прошедшие недели: от понедельника 2 недели назад до сегодняшнего воскресенья
