@@ -293,6 +293,58 @@ async def set_new_norm(message: Message):
         await message.answer(f'Неверный формат сообщения')
 
 
+@router.message(Command('set_dialog_price'))  # /set_dialog_price <price>
+async def set_dialog_price(message: Message):
+    if message.chat.type != 'private':
+        return
+    ad = await is_admin(message.from_user.username)
+    if not ad[0] or ad[2] == 0:
+        await message.answer('Доступ запрещён')
+        return
+    try:
+        price = int(message.text.split()[1])
+        if price <= 0:
+            await message.answer('Стоимость должна быть положительной')
+            return
+        await req.set_dialog_price(price)
+        await message.answer('Стоимость одного диалога обновлена')
+    except Exception:
+        await message.answer('Неверный формат. Пример: /set_dialog_price 50')
+
+
+@router.message(Command('set_top_premium'))  # /set_top_premium <amount>
+async def set_top_premium(message: Message):
+    if message.chat.type != 'private':
+        return
+    ad = await is_admin(message.from_user.username)
+    if not ad[0] or ad[2] == 0:
+        await message.answer('Доступ запрещён')
+        return
+    try:
+        amount = int(message.text.split()[1])
+        if amount < 0:
+            await message.answer('Сумма не может быть отрицательной')
+            return
+        await req.set_top_premium(amount)
+        await message.answer('Премия топ-агенту обновлена')
+    except Exception:
+        await message.answer('Неверный формат. Пример: /set_top_premium 600')
+
+
+@router.message(Command('get_current_price'))  # /get_current_price
+async def get_current_price(message: Message):
+    if message.chat.type != 'private':
+        return
+    ad = await is_admin(message.from_user.username)
+    if not ad[0]:
+        await message.answer('Доступ запрещён')
+        return
+    dialog_price, top_premium = await req.get_current_price()
+    await message.answer(
+        f'Текущая стоимость одного диалога (при отключённых нормах): {dialog_price} рублей\n'
+    )
+
+
 @router.message(Command('reset_norm'))  # /reset_norm <agent> [norm]
 async def reset_norm(message: Message):
     if message.chat.type != 'private':

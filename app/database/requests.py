@@ -174,6 +174,11 @@ async def set_dialog_price(price: int):
         await session.commit()
 
 
+async def get_current_price():
+    norm = await get_norm()
+    return int(norm.dialog_price or 0), int(norm.best_week_agent or 0)
+
+
 async def set_top_premium(amount: int):
     async with async_session() as session:
         norm = await session.scalar(select(Norm).where(Norm.id == 1))
