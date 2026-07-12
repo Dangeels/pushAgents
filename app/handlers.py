@@ -696,15 +696,15 @@ async def day_res(bot):
         await bot.send_message(chat_id=os.getenv('CHAT_ID'), text=report[i:i+4096])
 
 
-async def week_res(bot):
+async def week_res(bot, force: bool = False):
     # Промежуточный отчёт за неделю
-    report = await req.weekly_results()
+    report = await req.weekly_results(force=force)
     if report:
         for i in range(0, len(report), 4096):
             await bot.send_message(chat_id=os.getenv('CHAT_ID'), text=report[i:i+4096])
 
     # Итоговый отчёт за 2 недели
-    report2 = await req.biweekly_results()
+    report2 = await req.biweekly_results(force=force)
     if report2:
         for i in range(0, len(report2), 4096):
             await bot.send_message(chat_id=os.getenv('CHAT_ID'), text=report2[i:i+4096])

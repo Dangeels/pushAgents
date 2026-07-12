@@ -678,19 +678,20 @@ async def get_week_date_range(current_date: date):
     return monday, sunday
 
 
-async def weekly_results():
+async def weekly_results(current_date: date | None = None, force: bool = False):
     msk_tz = pytz.timezone("Europe/Moscow")
-    current_date = datetime.now(msk_tz).date()
+    current_date = current_date or datetime.now(msk_tz).date()
 
-    # Отчёт формируем только по воскресеньям (0=Пн … 6=Вс)
-    if current_date.weekday() != 6:
-        return ""
+    # В обычном режиме отчёт формируем только по воскресеньям (0=Пн … 6=Вс)
+    if not force:
+        if current_date.weekday() != 6:
+            return ""
 
-    # Чередование: недельный отчёт публикуем теперь в ЧЁТНЫЕ ISO-недели (сдвиг графика)
-    iso_week = current_date.isocalendar()[1]
-    # было if iso_week % 2 == 0:
-    if iso_week % 2 != 0:
-        return ""
+        # Чередование: недельный отчёт публикуем теперь в ЧЁТНЫЕ ISO-недели (сдвиг графика)
+        iso_week = current_date.isocalendar()[1]
+        # было if iso_week % 2 == 0:
+        if iso_week % 2 != 0:
+            return ""
 
     monday, sunday = await get_week_date_range(current_date)
 
@@ -741,8 +742,8 @@ async def weekly_results():
                     )
 
                     if positive_days == 7:
-                        text += f"\nБонус +{norm.week_norm_bонусы} рублей за ежедневное выполнение нормы"
-                        total_salary += norm.week_norm_bонусы
+                        text += f"\nБонус +{norm.week_norm_bonuses} рублей за ежедневное выполнение нормы"
+                        total_salary += norm.week_norm_bonuses
 
                     report_lines.append(text)
 
@@ -754,20 +755,21 @@ async def weekly_results():
             return f"Ошибка при формировании отчета: {e}"
 
 
-async def biweekly_results():
+async def biweekly_results(current_date: date | None = None, force: bool = False):
     """Итоговый отчёт за 2 прошедшие недели (с понедельника двухнедельного периода по воскресенье включительно)."""
     msk_tz = pytz.timezone("Europe/Moscow")
-    current_date = datetime.now(msk_tz).date()
+    current_date = current_date or datetime.now(msk_tz).date()
 
-    # Формируем по воскресеньям
-    if current_date.weekday() != 6:
-        return ""
+    # В обычном режиме формируем по воскресеньям
+    if not force:
+        if current_date.weekday() != 6:
+            return ""
 
-    # Чередование: двухнедельный отчёт публикуем теперь в НЕЧЁТНЫЕ ISO-недели (сдвиг графика)
-    iso_week = current_date.isocalendar()[1]
-    # было if iso_week % 2 == 1:
-    if iso_week % 2 == 0:
-        return ""
+        # Чередование: двухнедельный отчёт публикуем теперь в НЕЧЁТНЫЕ ISO-недели (сдвиг графика)
+        iso_week = current_date.isocalendar()[1]
+        # было if iso_week % 2 == 1:
+        if iso_week % 2 == 0:
+            return ""
 
     # Две прошедшие недели: от понедельника 2 недели назад до сегодняшнего воскресенья
     # Для воскресенья weekday()=6 => старт = current_date - 13
